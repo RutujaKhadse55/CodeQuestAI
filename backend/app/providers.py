@@ -40,3 +40,48 @@ def bundle_for(problem):
 
 
 USING_REAL_AI = config.USE_REAL_AI
+
+
+# ---- hooks owned by other roles; defaults keep Backend self-sufficient ----
+from typing import Callable  # noqa: E402
+
+_credits: Callable[[str], dict] | None = None          # Agents: ElevenLabs credit meter
+_learner_model = None                                   # AI: LearnerModel Protocol
+_deletion_hooks: dict[str, Callable[[str], None]] = {}  # Agents: Chroma memory, TTS cache; AI: profiles
+
+
+def register_credits(fn: Callable[[str], dict]) -> None:
+    global _credits
+    _credits = fn
+
+
+def credits(user_id: str) -> dict | None:
+    try:
+        return _credits(user_id) if _credits else None
+    except Exception:  # noqa: BLE001  (a broken meter must never break the dashboard)
+        return None
+
+
+def register_learner_model(m) -> None:
+    global _learner_model
+    _learner_model = m
+
+
+def learner_model():
+    return _learner_model
+
+
+def register_deletion_hook(name: str, fn: Callable[[str], None]) -> None:
+    """e.g. register_deletion_hook("memory", memory.delete_user); called by DELETE /users/{id}/data."""
+    _deletion_hooks[name] = fn
+
+
+def run_deletion_hooks(user_id: str) -> dict[str, str]:
+    out = {}
+    for name, fn in _deletion_hooks.items():
+        try:
+            fn(user_id)
+            out[name] = "ok"
+        except Exception as e:  # noqa: BLE001
+            out[name] = f"error: {type(e).__name__}"
+    return out

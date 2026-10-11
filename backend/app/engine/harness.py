@@ -8,6 +8,7 @@ Modes (stdin JSON, "mode" key):
   verify {"code","entry","oracle_code","reference_code","gen_code","comparator","seed","fp_seed","n","fp_n",
           "budget_s"} -> {"verify": {...summary...}}  (differential fuzz vs oracle, shrink, classify, trace).
          Raw fuzz inputs NEVER leave the container: only counts, a 0/1 vector, a failure class and a divergence.
+  both   run + verify payload merged: one container start for /analyze
   trace  {"code","reference_code","entry","args"} -> {"trace": divergence|null}
 Learner stdout/stderr is captured and discarded so it cannot forge result lines.
 """
@@ -241,7 +242,11 @@ def main() -> None:
     signal.signal(signal.SIGALRM, _on_alarm)
     mode = req.get("mode", "run")
     try:
-        {"run": _do_run, "verify": _do_verify, "trace": _do_trace}[mode](req, emit)
+        if mode == "both":  # examples then differential fuzz, one container start
+            _do_run(req, emit)
+            _do_verify(req, emit)
+        else:
+            {"run": _do_run, "verify": _do_verify, "trace": _do_trace}[mode](req, emit)
     except BaseException as e:  # noqa: BLE001
         emit({"load_error": f"{type(e).__name__}: {e}"[:500]})
 

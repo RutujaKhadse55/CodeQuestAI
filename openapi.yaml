@@ -16,7 +16,9 @@ components:
       required: [code]
       properties:
         code: {type: string, enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, RATE_LIMITED, CODE_REJECTED, HINT_LOCKED, UNSUPPORTED_PROBLEM, UNSUPPORTED_LANGUAGE, CREDIT_CAP_REACHED, UPSTREAM_FAILED]}
-        message: {type: string, nullable: true}
+        message: {type: string, nullable: true, description: "specific English detail, when available"}
+        message_key: {type: string, description: "errors.<CODE>; map to the extension's locale files"}
+        localized: {type: string, description: "generic message in the language of X-Lang / Accept-Language (en, hi, mr)"}
     Example:
       type: object
       required: [input_text, output_text]
@@ -187,13 +189,20 @@ paths:
       responses:
         "200":
           description: ok
-          content: {application/json: {example: {user_id: mock-user-1, mastery: {arrays: 1210}, mistakes: {missing_edge_single: 2}, recent: [], verified: {oracle-verified: 1, unverified: 0}}}}
+          description: "v2: adds heatmap, profile (habits) and credits (null until Agents registers the meter)"
+          content: {application/json: {example: {user_id: mock-user-1, mastery: {array: 874.4}, mistakes: {missing_edge_single: 2}, heatmap: [{problem_slug: binary-search, mistake_class: missing_edge_single, count: 2}], recent: [], verified: {oracle-verified: 1, unverified: 0}, attempts: 2, solved: 1, profile: {attempts: 2, solved: 1, habits: {paste_rate: 0.5, edge_case_miss_rate: 1.0}, top_mistakes: [], source: backend-basic}, credits: null}}}
   /recommend/{user_id}:
     get:
-      summary: Next curated LeetCode problem by weakest concept
+      summary: Next curated LeetCode problem by weakest concept (deterministic; skips solved)
       parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
       responses:
-        "200": {description: ok, content: {application/json: {example: {slug: binary-search, title: Binary Search, reason: "weakest concept: boundaries"}}}}
+        "200": {description: "slug is null when every curated problem is solved", content: {application/json: {example: {slug: binary-search, title: Binary Search, number: 704, difficulty: Easy, url: "https://leetcode.com/problems/binary-search/", concept: binary search, reason: "weakest concept: binary search (rating 874)"}}}}
+  /users/{user_id}/data:
+    delete:
+      summary: Delete-all - every SQL row for the learner, then Agents'/AI's registered hooks (Chroma memory, caches). Idempotent.
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: ok, content: {application/json: {example: {user_id: u1, deleted: {attempts: 2, test_results: 8, diagnoses: 1, concept_mastery: 2}, hooks: {memory: ok}}}}}
   /tts:
     post:
       summary: Text to speech (Agents-owned; mock returns browser fallback)

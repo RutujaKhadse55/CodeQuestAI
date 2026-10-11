@@ -1,11 +1,14 @@
 import re
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
 from ..contracts.enums import ErrorCode
-from .. import providers
+from sqlmodel import func, select
+
+from .. import config, providers
 from ..contracts.models import AnalyzeRequest, AnalyzeResponse, Diagnosis, LCProblem, TestResult
 from ..db.models_core import (Attempt, DiagnosisRow, HabitEvent, LCProblemRow, TestResultRow, User)
 from ..deps import get_session
@@ -56,6 +59,11 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
     """v1: policy -> examples (+ Run capture) -> fuzz vs oracle -> shrink -> trace -> diagnose -> persist."""
     if normalize_lang(req.language) != "python3":
         raise ApiError(ErrorCode.UNSUPPORTED_LANGUAGE, "only python3 is executed")
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    used = session.exec(select(func.count()).select_from(Attempt).where(
+        Attempt.user_id == req.user_id, Attempt.created_at >= today)).one()
+    if used >= config.DAILY_ANALYZE_CAP:
+        raise ApiError(ErrorCode.RATE_LIMITED, f"daily analyze cap of {config.DAILY_ANALYZE_CAP} reached")
     row = session.get(LCProblemRow, req.problem_slug)
     if row is None:
         raise ApiError(ErrorCode.UNSUPPORTED_PROBLEM, "problem not captured; call /problems/capture first")
@@ -73,30 +81,28 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
     params = own.params or starter.params
     tests, flags = build_tests(problem, req, params)
     results = []
-    if not tests:
-        flags.append("no_runnable_tests")
-    else:
-        try:
-            results = engine.sandbox_run(req.code, req.code, tests)
-        except SandboxUnavailable as e:
-            raise ApiError(ErrorCode.UPSTREAM_FAILED, f"sandbox unavailable: {e}")
-
     fuzz = None
     bundle = providers.bundle_for(problem)
+    use_fuzz = bundle.verified
     if not bundle.verified:
         flags.append("no_reference_bundle")
     elif any(ast_policy.check(c) for c in (bundle.oracle_code, bundle.reference_code, bundle.gen_inputs_code)):
         flags.append("bundle_rejected")
-    else:
-        seed = secrets.randbelow(2**31)  # fresh per attempt; stored, never shown
-        try:
-            fuzz = engine.fuzz(req.code, bundle, seed)
-        except SandboxUnavailable as e:
-            raise ApiError(ErrorCode.UPSTREAM_FAILED, f"sandbox unavailable: {e}")
-        flags.extend(fuzz.flags)
-        if fuzz.ran:
-            results.append(TestResult(kind="fuzz", outcome=fuzz.first_kind or "passed",
-                                      failure_class=fuzz.failure_class))  # never input/expected/actual
+        use_fuzz = False
+    if not tests:
+        flags.append("no_runnable_tests")
+    try:
+        if use_fuzz:
+            seed = secrets.randbelow(2**31)  # fresh per attempt; stored, never shown
+            results, fuzz = engine.run_and_fuzz(req.code, tests, bundle, seed)
+            flags.extend(fuzz.flags)
+            if fuzz.ran:
+                results.append(TestResult(kind="fuzz", outcome=fuzz.first_kind or "passed",
+                                          failure_class=fuzz.failure_class))  # never input/expected/actual
+        elif tests:
+            results = engine.sandbox_run(req.code, req.code, tests)
+    except SandboxUnavailable as e:
+        raise ApiError(ErrorCode.UPSTREAM_FAILED, f"sandbox unavailable: {e}")
 
     examples_ok = bool(results) and all(r.outcome == "passed" for r in results if r.kind != "fuzz")
     fuzz_ok = fuzz is None or not fuzz.ran or fuzz.passed

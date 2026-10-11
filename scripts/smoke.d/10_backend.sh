@@ -14,3 +14,7 @@ curl -sf -H "$H" -H "$J" -XPOST "$B/analyze" -d "{\"user_id\":\"$UID_\",\"proble
   | python -c "import sys,json; d=json.load(sys.stdin); f=[r for r in d['results'] if r['kind']=='fuzz'][0]; assert f['outcome']=='wrong_output' and f['failure_class']=='single_element' and f['input'] is None, d"
 curl -sf -H "$H" "$B/hint-state/$UID_/binary-search" | grep -q '"allowed_level"'
 curl -sf -H "$H" "$B/dashboard/$UID_" | grep -q '"mistakes"'
+# Phase 3: recommend + localised error + delete-all
+curl -sf -H "$H" "$B/recommend/$UID_" | grep -q '"slug"'
+curl -s -H "X-Lang: hi" "$B/health" | grep -q 'errors.UNAUTHORIZED'
+curl -sf -H "$H" -XDELETE "$B/users/$UID_/data" | grep -q '"deleted"'
