@@ -1,9 +1,7 @@
 // ─── Result Card — Shadow DOM panel ──────────────────────────────────────────
 // Fully matches the CodeQuest reference screenshots.
 
-import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus, ChatStreamEvent,
-  ExplainProblemResponse, CrewEnvelope, CrewTestReport, CrewTestCase, CrewTraceReport, CrewDebugReport, CrewExplanation } from "../api/types";
-import { renderMarkdown, stripMarkdown } from "./markdown";
+import type { AnalyzeResponse, TestResult, Diagnosis, Verified } from "../api/types";
 import { LOGO_DATA_URL } from "../assets/logo";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -17,18 +15,61 @@ const CARD_CSS = `
 /* ── Panel shell ─────────────────────────────────────────────────────────── */
 #cq-panel {
   position: fixed;
-  top: 0; right: -410px;
-  width: 390px; height: 100vh;
+  top: 0; right: -462px;
+  width: 462px; height: 100vh;
   background: #f5efe0;
   border-left: 1px solid #ddd4c0;
   display: flex; flex-direction: column;
   z-index: 2147483646;
-  transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
+  transition: right 0.35s cubic-bezier(0.4,0,0.2,1),
+              bottom 0.35s cubic-bezier(0.4,0,0.2,1),
+              width 0.35s cubic-bezier(0.4,0,0.2,1),
+              height 0.35s cubic-bezier(0.4,0,0.2,1),
+              border-radius 0.35s cubic-bezier(0.4,0,0.2,1),
+              box-shadow 0.35s;
   box-shadow: -6px 0 28px rgba(0,0,0,0.13);
   color: #111827; overflow: hidden;
   font-family: 'Inter', system-ui, sans-serif;
 }
 #cq-panel.open { right: 0; }
+
+/* ── Minimized FAB bubble ───────────────────────────────────────── */
+#cq-panel.minimized {
+  right: 20px !important;
+  top: auto !important;
+  bottom: 20px;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: #1a1f2e;
+  border: none;
+  border-left: none;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 0 4px rgba(217,119,6,0.3);
+  cursor: pointer;
+}
+#cq-panel.minimized .cq-panel-inner {
+  opacity: 0; pointer-events: none; transform: scale(0.85);
+}
+#cq-panel.minimized .cq-min-logo {
+  opacity: 1; pointer-events: all; transform: scale(1);
+}
+/* Wrapper around all panel content */
+.cq-panel-inner {
+  display: flex; flex-direction: column; height: 100%;
+  transition: opacity 0.25s ease, transform 0.2s ease;
+  opacity: 1; transform: scale(1);
+}
+/* Logo shown when minimized */
+.cq-min-logo {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transform: scale(0.5);
+  transition: opacity 0.25s ease 0.1s, transform 0.25s ease 0.1s;
+}
+.cq-min-logo img {
+  width: 40px; height: 40px; border-radius: 50%;
+  object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.3));
+}
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 .cq-header {
@@ -63,21 +104,31 @@ const CARD_CSS = `
   transition: color 0.15s; font-weight: 300; line-height: 1;
 }
 .cq-close:hover { color: #111827; }
+.cq-minimize {
+  background: none; border: none; cursor: pointer;
+  color: #6b7280; font-size: 1.1rem; padding: 2px 6px;
+  transition: color 0.15s, background 0.15s; font-weight: 400; line-height: 1;
+  border-radius: 5px; display: flex; align-items: center; justify-content: center;
+}
+.cq-minimize:hover { color: #111827; background: #f3f4f6; }
 
 /* ── Tabs ────────────────────────────────────────────────────────────────── */
 .cq-tabs {
   display: flex;
   background: #fff;
   border-bottom: 1.5px solid #ede8df;
-  flex-shrink: 0; padding: 0 10px;
+  flex-shrink: 0; padding: 0 4px;
+  overflow-x: auto; scrollbar-width: none;
 }
+.cq-tabs::-webkit-scrollbar { display: none; }
 .cq-tab {
-  flex: 1; padding: 13px 4px 11px;
+  flex: 1; padding: 12px 2px 10px;
   background: none; border: none;
   border-bottom: 2.5px solid transparent;
   margin-bottom: -1.5px;
-  cursor: pointer; font-size: 0.8rem; font-weight: 500;
+  cursor: pointer; font-size: 0.71rem; font-weight: 500;
   color: #9ca3af; font-family: inherit; transition: all 0.15s;
+  white-space: nowrap;
 }
 .cq-tab.active { color: #b45309; border-bottom-color: #d97706; font-weight: 700; }
 .cq-tab:hover:not(.active) { color: #374151; }
@@ -419,41 +470,8 @@ const CARD_CSS = `
   border-radius: 4px 14px 14px 14px;
   padding: 10px 13px; font-size: 0.84rem; color: #374151;
   line-height: 1.55; max-width: 82%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06); white-space: pre-wrap; overflow-wrap: anywhere;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06); white-space: pre-wrap;
 }
-.chat-col { display: flex; flex-direction: column; gap: 4px; max-width: 86%; min-width: 0; }
-.chat-col .chat-text { max-width: 100%; }
-/* rendered Markdown (assistant replies) */
-.chat-text.md { white-space: normal; }
-.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
-.md p { margin: 0 0 9px; }
-.md strong { font-weight: 700; color: #111827; } .md em { font-style: italic; } .md del { opacity: .65; }
-.md ul, .md ol { margin: 4px 0 9px; padding-left: 20px; } .md li { margin: 3px 0; } .md li > ul, .md li > ol { margin: 3px 0; }
-.md h3, .md h4, .md h5 { margin: 12px 0 5px; font-weight: 700; color: #111827; line-height: 1.3; }
-.md h3 { font-size: 1.02rem; } .md h4 { font-size: .93rem; } .md h5 { font-size: .86rem; text-transform: none; }
-.md code { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 1px 5px; font: .78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #b45309; }
-.md .cq-code { margin: 9px 0; border-radius: 9px; overflow: hidden; border: 1px solid #1e293b; background: #0f172a; }
-.md .cq-code-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: #1e293b; color: #94a3b8; font-size: .68rem; text-transform: lowercase; }
-.md .cq-copy { background: transparent; color: #cbd5e1; border: 1px solid #475569; border-radius: 5px; padding: 1px 8px; font-size: .66rem; cursor: pointer; }
-.md .cq-copy:hover { background: #334155; }
-.md .cq-code pre { margin: 0; padding: 10px 12px; overflow-x: auto; white-space: pre; }
-.md .cq-code pre code { background: none; border: 0; padding: 0; color: #e2e8f0; font-size: .77rem; }
-.md blockquote { margin: 7px 0; padding: 5px 11px; border-left: 3px solid #d97706; background: #fffbeb; color: #92400e; border-radius: 0 6px 6px 0; }
-.md blockquote > :last-child { margin-bottom: 0; }
-.md .cq-table { overflow-x: auto; margin: 7px 0; }
-.md table { border-collapse: collapse; font-size: .78rem; } .md th, .md td { border: 1px solid #e5e7eb; padding: 4px 9px; text-align: left; } .md th { background: #f9fafb; font-weight: 700; }
-.md hr { border: 0; border-top: 1px solid #e5e7eb; margin: 11px 0; }
-.md a { color: #1d7eef; text-decoration: underline; }
-.chat-chips { display: flex; gap: 5px; flex-wrap: wrap; padding-left: 2px; }
-.chat-chip { font-size: .64rem; font-weight: 600; color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; padding: 1px 8px; }
-.chat-chip.good { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
-.chat-chip.warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
-.chat-tools { display: flex; gap: 6px; padding-left: 2px; opacity: 0; transition: opacity .15s; }
-.chat-col:hover .chat-tools, .chat-col:focus-within .chat-tools { opacity: 1; }
-.chat-tool { background: none; border: 0; color: #9ca3af; font-size: .68rem; cursor: pointer; padding: 0 2px; }
-.chat-tool:hover { color: #374151; }
-.cq-caret::after { content: "▍"; margin-left: 1px; color: #d97706; animation: cqblink 1s steps(2) infinite; }
-@keyframes cqblink { 50% { opacity: 0; } }
 .chat-bubble.user { flex-direction: row-reverse; }
 .chat-bubble.user .chat-av { background: linear-gradient(135deg, #374151, #1f2937); }
 .chat-bubble.user .chat-text {
@@ -518,6 +536,309 @@ const CARD_CSS = `
   border-radius: 12px; padding: 18px; color: #9ca3af;
   font-size: 0.84rem; text-align: center; line-height: 1.5;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   EXPLAIN / VISUAL EXPLANATION TAB
+═══════════════════════════════════════════════════════════════ */
+.explain-outer { padding: 0 16px 20px; display: flex; flex-direction: column; gap: 0; }
+.explain-hero {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 0 14px;
+}
+.explain-hero-left { display: flex; align-items: center; gap: 14px; }
+.explain-hero-icon {
+  width: 52px; height: 52px; border-radius: 14px; flex-shrink: 0;
+  background: #fef3c7; display: flex; align-items: center; justify-content: center;
+  font-size: 1.55rem;
+}
+.explain-hero-title { font-size: 1.05rem; font-weight: 800; color: #111827; }
+.explain-hero-sub   { font-size: 0.78rem; color: #6b7280; margin-top: 3px; font-weight: 400; }
+.explain-listen-row {
+  display: flex; justify-content: flex-end; margin-bottom: 12px;
+}
+/* Feature description card (title + subtitle, rounded border) */
+.tab-desc-card {
+  background: #fff; border: 1.5px solid #e5dece; border-radius: 14px;
+  padding: 13px 16px; margin-bottom: 14px;
+}
+.tab-desc-card-title {
+  font-size: 0.88rem; font-weight: 700; color: #111827; margin-bottom: 4px;
+}
+.tab-desc-card-sub {
+  font-size: 0.78rem; color: #6b7280; line-height: 1.6; font-weight: 400;
+}
+/* Numbered step card */
+.vstep-card {
+  background: #fff; border: 1px solid #ebe5d9; border-radius: 16px;
+  margin-bottom: 14px; overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.vstep-body { display: flex; gap: 0; }
+.vstep-left { flex: 1; padding: 16px 14px 16px 16px; }
+.vstep-right {
+  flex: 0 0 175px; padding: 14px 12px;
+  background: #faf8f4;
+  border-left: 1px solid #ebe5d9;
+  display: flex; flex-direction: column; gap: 7px; justify-content: center; align-items: center;
+}
+.vstep-num-row { display: flex; align-items: center; gap: 11px; margin-bottom: 8px; }
+.vstep-num {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  background: #d97706; color: #fff; font-size: 0.95rem; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.vstep-title { font-size: 0.92rem; font-weight: 700; color: #d97706; }
+.vstep-desc { font-size: 0.83rem; color: #374151; line-height: 1.7; font-weight: 400; }
+/* Inline code chip inside desc text */
+.ic { display: inline-block; background: #fde68a; color: #92400e; border-radius: 4px;
+  padding: 1px 6px; font-family: 'Courier New', monospace; font-size: 0.76rem; font-weight: 600; }
+/* Full-width step (no right col) */
+.vstep-full { padding: 16px; }
+/* Array visualization */
+.arr-viz { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.arr-header-row { font-size: 0.67rem; color: #9ca3af; margin-bottom: 2px; }
+.arr-cells-row { display: flex; align-items: center; gap: 3px; }
+.arr-brk { font-size: 1.1rem; font-weight: 600; color: #6b7280; }
+.arr-sep { font-size: 0.72rem; color: #9ca3af; }
+.arr-cell {
+  width: 30px; height: 30px; border: 1.5px solid #d1d5db; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.82rem; font-weight: 600; color: #374151; background: #fff;
+  flex-shrink: 0;
+}
+.arr-cell.hl  { background: #dcfce7; border-color: #4ade80; color: #15803d; }
+.arr-cell.hl2 { background: #fef3c7; border-color: #f59e0b; color: #b45309; }
+.arr-idx-row { display: flex; align-items: center; gap: 3px; padding-left: 18px; }
+.arr-idx { width: 30px; text-align: center; font-size: 0.6rem; color: #9ca3af; }
+.target-pill {
+  background: #fff; border: 1.5px solid #d1d5db; border-radius: 20px;
+  padding: 5px 14px; font-size: 0.78rem; font-weight: 700; color: #374151;
+  font-family: 'Courier New', monospace; align-self: center; margin-top: 4px;
+}
+.sum-pill {
+  background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px;
+  padding: 6px 10px; font-size: 0.8rem; font-weight: 700; color: #92400e;
+  text-align: center; font-family: 'Courier New', monospace; width: 100%;
+}
+.output-pill {
+  background: #dcfce7; border: 1px solid #86efac; border-radius: 8px;
+  padding: 6px 10px; font-size: 0.8rem; font-weight: 700; color: #16a34a;
+  display: flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
+}
+/* Rules bullet list */
+.rules-ul { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.rules-ul li { display: flex; gap: 7px; font-size: 0.81rem; color: #374151; line-height: 1.5; align-items: flex-start; }
+.rules-ul li::before { content: "\u25cf"; color: #d97706; flex-shrink: 0; margin-top: 2px; font-size: 0.6rem; }
+/* Key Insight mini card */
+.key-insight {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;
+  padding: 10px 12px; display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;
+}
+.ki-icon { font-size: 0.9rem; flex-shrink: 0; margin-top: 1px; }
+.ki-title { font-size: 0.66rem; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+.ki-text  { font-size: 0.8rem; color: #374151; line-height: 1.5; }
+/* Final understanding card */
+.final-inner {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: #dcfce7; border: 1px solid #86efac; border-radius: 10px;
+  padding: 12px; margin-top: 8px;
+}
+.final-check { font-size: 1.2rem; flex-shrink: 0; }
+.final-text { font-size: 0.82rem; color: #374151; line-height: 1.65; }
+/* AI-gen image placeholder */
+.viz-img-slot {
+  width: 100%; min-height: 70px; border-radius: 8px; border: 1px dashed #e5e7eb;
+  background: #f9fafb; display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; color: #9ca3af; text-align: center; padding: 8px;
+}
+.viz-img-slot img { width: 100%; height: auto; border-radius: 8px; }
+/* Shimmer loading */
+.vstep-loading {
+  height: 60px; border-radius: 8px;
+  background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+  background-size: 200% 100%; animation: vshimmer 1.5s infinite;
+}
+@keyframes vshimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+/* ═══════════════════════════════════════════════════════════════
+   CODE EXPLAIN TAB (step-by-step code walkthrough)
+═══════════════════════════════════════════════════════════════ */
+.cexp-outer { padding: 0 16px 20px; display: flex; flex-direction: column; gap: 0; }
+.cexp-hero {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 0 10px;
+}
+.cexp-hero-left { display: flex; align-items: center; gap: 14px; }
+.cexp-hero-icon {
+  width: 50px; height: 50px; border-radius: 14px; flex-shrink: 0;
+  background: #fef3c7; display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem;
+}
+.cexp-hero-title { font-size: 1.05rem; font-weight: 900; color: #111827; text-transform: uppercase; letter-spacing: 0.04em; }
+.cexp-hero-sub   { font-size: 0.78rem; color: #6b7280; margin-top: 2px; }
+/* Numbered step card (same vstep-* classes re-used) */
+/* Code block */
+.cexp-code-wrap {
+  background: #1e2233; border-radius: 10px; overflow: hidden;
+  margin-top: 10px; border: 1px solid #2d3347;
+}
+.cexp-code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: #252b3b; border-bottom: 1px solid #2d3347;
+}
+.cexp-code-lang { font-size: 0.7rem; color: #94a3b8; font-family: 'Courier New', monospace; }
+.cexp-copy-btn {
+  background: none; border: none; cursor: pointer; color: #94a3b8;
+  font-size: 0.7rem; display: flex; align-items: center; gap: 4px;
+  padding: 2px 6px; border-radius: 5px; transition: color 0.15s;
+}
+.cexp-copy-btn:hover { color: #f1f5f9; }
+.cexp-code-body {
+  padding: 12px 14px; overflow-x: auto;
+  font-family: 'Courier New', monospace; font-size: 0.78rem;
+  line-height: 1.7; color: #e2e8f0; white-space: pre;
+}
+/* Syntax colour tokens */
+.ck { color: #7dd3fc; font-weight: 600; }   /* keyword: def for if return in */
+.cf { color: #a78bfa; }                      /* function name */
+.cs { color: #6ee7b7; }                      /* string */
+.cn { color: #fde68a; }                      /* number/builtin */
+.cc { color: #6b7280; font-style: italic; }  /* comment */
+/* Complexity pill */
+.cplx-pill {
+  display: inline-block; background: #fef3c7; border: 1px solid #fde68a;
+  border-radius: 6px; padding: 2px 8px;
+  font-family: 'Courier New', monospace; font-size: 0.76rem; font-weight: 700; color: #92400e;
+}
+.cplx-desc { font-size: 0.82rem; color: #374151; line-height: 1.6; display: inline; margin-left: 6px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   APPROACH TAB
+═══════════════════════════════════════════════════════════════ */
+/* Re-uses .cexp-outer, .vstep-card, .vstep-full, .vstep-num, .vstep-title,
+   .vstep-desc, .ic, .rules-ul, .key-insight, .listen-btn from other tabs   */
+.apr-hero {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 16px 0 4px;
+}
+.apr-hero-left { display: flex; align-items: center; gap: 14px; }
+.apr-hero-icon {
+  width: 50px; height: 50px; border-radius: 14px; flex-shrink: 0;
+  background: #fef3c7; display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+}
+.apr-hero-title { font-size: 1.0rem; font-weight: 800; color: #111827; text-transform: uppercase; letter-spacing: 0.03em; }
+.apr-hero-sub   { font-size: 0.76rem; color: #6b7280; margin-top: 2px; }
+/* Profile section - inside a vstep-card */
+.apr-profile-name { font-size: 0.96rem; font-weight: 700; color: #111827; margin-bottom: 3px; }
+.apr-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; }
+.apr-badge { font-size: 0.62rem; font-weight: 600; padding: 2px 7px; border-radius: 5px; }
+.apr-badge.inter { background: #dbeafe; color: #1d4ed8; }
+.apr-badge.lang  { background: #dbeafe; color: #1d4ed8; }
+.apr-solved { font-size: 0.78rem; color: #374151; display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.apr-solved strong { font-weight: 700; color: #111827; }
+.apr-easy  { color: #16a34a; } .apr-med { color: #d97706; } .apr-hard { color: #dc2626; }
+.apr-sync  { font-size: 0.65rem; color: #9ca3af; margin-left: auto; display: flex; align-items: center; gap: 3px; }
+.apr-topics-row { display: flex; gap: 14px; margin-top: 4px; flex-wrap: wrap; }
+.apr-topics-col { flex: 1; }
+.apr-topics-label { font-size: 0.62rem; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; }
+.apr-chip {
+  display: inline-flex; font-size: 0.68rem; font-weight: 600;
+  padding: 2px 8px; border-radius: 20px; margin: 2px 3px 2px 0;
+}
+.apr-chip.strong { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+.apr-chip.growth { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+/* Pattern insights - 2 equal cards side by side */
+.apr-patterns { display: flex; gap: 10px; margin-top: 4px; }
+.apr-pattern-card { flex: 1; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; }
+.apr-pattern-row  { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.apr-pattern-name { font-size: 0.82rem; font-weight: 700; color: #111827; flex: 1; }
+.apr-pat-badge {
+  font-size: 0.58rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 2px 6px; border-radius: 5px; text-transform: uppercase;
+}
+.apr-pat-badge.strong { background: #d1fae5; color: #065f46; }
+.apr-pat-badge.growth { background: #fef3c7; color: #92400e; }
+.apr-pat-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
+.apr-pat-check { color: #16a34a; font-size: 0.9rem; }
+.apr-pat-dot   { width: 8px; height: 8px; border-radius: 50%; background: #d97706; }
+.apr-pattern-sub { font-size: 0.72rem; color: #6b7280; }
+/* Section header row inside a step card */
+.apr-sec-head { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.apr-sec-icon {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  background: #fef3c7; display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+}
+.apr-sec-title { font-size: 0.88rem; font-weight: 700; color: #111827; flex: 1; }
+.apr-sec-sub   { font-size: 0.72rem; color: #6b7280; }
+/* Approach cards */
+.approach-card {
+  border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 7px; background: #fff;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.approach-card.best { border-color: #d97706; background: #fffbeb; box-shadow: 0 0 0 2px rgba(217,119,6,0.12); }
+.approach-num {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.82rem; font-weight: 700; color: #fff; background: #d1d5db; margin-top: 2px;
+}
+.approach-num.best { background: #d97706; }
+.approach-body { flex: 1; }
+.approach-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 3px; }
+.approach-name { font-size: 0.86rem; font-weight: 700; color: #111827; }
+.apr-diff-badge { font-size: 0.58rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.apr-diff-badge.beg { background: #d1fae5; color: #065f46; }
+.apr-diff-badge.int { background: #dbeafe; color: #1d4ed8; }
+.apr-diff-badge.adv { background: #ede9fe; color: #6d28d9; }
+.apr-best-badge {
+  background: #d97706; color: #fff; font-size: 0.58rem; font-weight: 700;
+  padding: 2px 7px; border-radius: 5px; display: flex; align-items: center; gap: 3px;
+}
+.apr-baseline-badge { background: #f3f4f6; color: #6b7280; font-size: 0.58rem; font-weight: 600; padding: 2px 6px; border-radius: 5px; }
+.approach-meta { font-size: 0.72rem; color: #6b7280; margin-bottom: 2px; }
+.approach-idea { font-size: 0.78rem; color: #374151; }
+.approach-why  { font-size: 0.72rem; color: #92400e; margin-top: 3px; }
+.approach-steps-btn {
+  flex-shrink: 0; font-size: 0.7rem; font-weight: 600;
+  padding: 5px 11px; border-radius: 8px; cursor: pointer; align-self: center;
+  transition: opacity 0.15s; white-space: nowrap;
+}
+.approach-steps-btn.normal { background: #fff; border: 1.5px solid #d1d5db; color: #374151; }
+.approach-steps-btn.best   { background: #d97706; border: none; color: #fff; box-shadow: 0 2px 5px rgba(217,119,6,0.3); }
+.approach-steps-btn:hover  { opacity: 0.8; }
+/* Thinking guide */
+.think-steps { margin-top: 6px; display: flex; flex-direction: column; gap: 7px; }
+.think-step { display: flex; gap: 9px; align-items: flex-start; }
+.think-num {
+  width: 20px; height: 20px; border-radius: 50%; background: #d97706; flex-shrink: 0;
+  color: #fff; font-size: 0.68rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; margin-top: 1px;
+}
+.think-text { font-size: 0.79rem; color: #374151; line-height: 1.5; }
+.think-text strong { color: #111827; font-weight: 700; }
+/* Bottom complexity + confidence row */
+.apr-bottom { display: flex; gap: 10px; }
+.apr-complexity-card, .apr-confidence-card {
+  flex: 1; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px;
+}
+.apr-complexity-label { font-size: 0.62rem; color: #9ca3af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+.apr-complexity-sub   { font-size: 0.66rem; color: #6b7280; margin-bottom: 8px; }
+.apr-cmplx-row { display: flex; gap: 14px; }
+.apr-cmplx-col { text-align: center; }
+.apr-cmplx-name { font-size: 0.62rem; color: #6b7280; margin-bottom: 2px; }
+.apr-cmplx-val { font-size: 1.15rem; font-weight: 800; font-family: 'Courier New', monospace; }
+.apr-cmplx-val.time  { color: #16a34a; }
+.apr-cmplx-val.space { color: #6d28d9; }
+.apr-cmplx-why { font-size: 0.66rem; color: #6b7280; margin-top: 7px; border-top: 1px solid #f3f4f6; padding-top: 6px; }
+.apr-cmplx-why strong { color: #374151; font-weight: 600; }
+.apr-confidence-card { display: flex; gap: 9px; align-items: flex-start; }
+.apr-conf-check {
+  width: 24px; height: 24px; border-radius: 50%; background: #16a34a; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.85rem;
+}
+.apr-conf-title { font-size: 0.66rem; font-weight: 700; color: #111827; margin-bottom: 3px; }
+.apr-conf-text  { font-size: 0.74rem; color: #374151; line-height: 1.5; }
 `;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -532,19 +853,7 @@ function mistakeLabel(cls: string | null | undefined) {
   if (!cls) return "Unknown Issue";
   return cls.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-function esc(t: unknown): string {
-  return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
-}
-
-/** AI crew call through the service worker; null when the backend / FEATURE_CREW is unavailable. */
-async function crew<T>(agent: "explain" | "tests" | "debug" | "trace", body: Record<string, unknown>): Promise<CrewEnvelope<T> | null> {
-  try {
-    const r = await chrome.runtime.sendMessage({ type: "CREW", agent, body }) as (CrewEnvelope<T> & { error?: string }) | null;
-    return r && !r.error && r.result ? r : null;
-  } catch { return null; }
-}
-
-export function playText(text: string) {
+function playText(text: string) {
   if (!text) return;
   chrome.runtime.sendMessage({ type: "PLAY_TTS", text, lang: "en" }).catch(() => {
     speechSynthesis.cancel();
@@ -567,19 +876,11 @@ export class ResultCard {
   private attemptId: number | null = null;
   private slug = "";
   private unsupportedLang: string | null = null;
-  private explanationOnly: string | null = null;
-  private reviewCode = "";
-  private reviewLang = "";
-  private reviewSent = false;
+  private submittedCode = "";
+  private submittedLang = "python";
   private traceIter = 1;
-  private traceTotalIter = 3; // simulated steps; Phase 3: from real tracer
-  private chatSend: ((text: string) => void) | null = null;
-  private hiddenList: CrewTestCase[] | null = null;   // AI-generated (and sandbox-run) test cases; null = not loaded
-  private hiddenInfo = "";
-  private hiddenBusy = false;
-  private explainBusy = false;
-  private traceLoaded = false;
-  private explainText = "";
+  private traceTotalIter = 3;
+  private panelClickAttached = false; // guard against listener stacking
 
   constructor() {
     this.host = document.createElement("div");
@@ -607,54 +908,22 @@ export class ResultCard {
     this.shadow.getElementById("cq-close-btn")?.addEventListener("click", () => this.close());
   }
 
-  /** The learner's code + editor language, used for the AI review when the code cannot be executed. */
-  setReviewCode(code: string, language: string): void { this.reviewCode = code; this.reviewLang = language; this.reviewSent = false; }
-
-  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string, explanationOnly?: string, startTab?: string): void {
+  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string, code?: string, lang?: string): void {
     this.response = res; this.attemptId = res.attempt_id;
     this.slug = slug; this.unsupportedLang = unsupportedLang ?? null;
-    this.explanationOnly = explanationOnly ?? null;
-    this.hiddenList = null; this.hiddenInfo = ""; this.traceLoaded = false;
-    this.activeTab = startTab ?? (explanationOnly ? "chat" : "verdict"); this.traceIter = 1; // nothing ran: open the chat directly
+    this.submittedCode = code ?? "";
+    this.submittedLang = lang ?? "python";
+    this.activeTab = "codeexplain"; this.traceIter = 1;
     // estimate trace steps from iteration field
     if (res.diagnosis?.divergence?.iteration) this.traceTotalIter = Math.max(3, res.diagnosis.divergence.iteration + 1);
     this.panel.classList.add("open"); this.host.style.pointerEvents = "all";
     this.render();
   }
 
-  /** True when the panel already holds results for this problem (so a toolbar action can just switch tabs). */
-  hasResultsFor(slug: string): boolean { return !!this.response && this.slug === slug; }
-
-  /** Switch the visible tab (no re-render). */
-  switchTab(id: string): void {
-    this.activeTab = id;
-    this.panel.classList.add("open"); this.host.style.pointerEvents = "all";
-    this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tab === id));
-    this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${id}`));
-    if (id === "explain") void this.prefillExplain();
-    if (id === "trace") void this.loadCrewTrace();
-    if (id === "hiddentests" && !this.hiddenInfo) void this.loadHidden();
-  }
-
-  /**
-   * Toolbar entry point for Explain / Concept / Chat: open the Chat tab without running code analysis.
-   * `send` asks the question right away; otherwise `text` is only placed in the input box.
-   */
-  openChat(slug: string, text?: string, send = false): void {
-    if (!this.hasResultsFor(slug)) {
-      const idle: AnalyzeResponse = { attempt_id: 0, verified: "unverified", results: [], diagnosis: null, explanation: null, flags: [], allowed_hint_level: 1 };
-      this.showResults(idle, slug, undefined, undefined, "chat");
-    } else this.switchTab("chat");
-    if (!text) return;
-    if (send && this.chatSend) this.chatSend(text);
-    else {
-      const input = this.shadow.getElementById("cq-chat-input") as HTMLInputElement | null;
-      if (input) { input.value = text; input.focus(); }
-    }
-  }
-
-  close(): void { this.panel.classList.remove("open"); this.host.style.pointerEvents = "none"; stopTTS(); }
+  close(): void    { this.panel.classList.remove("open"); this.host.style.pointerEvents = "none"; stopTTS(); }
   isOpen(): boolean { return this.panel.classList.contains("open"); }
+  minimize(): void  { this.panel.classList.add("minimized"); }
+  maximize(): void  { this.panel.classList.remove("minimized"); }
 
   // ── Header ──────────────────────────────────────────────────────────────────
 
@@ -667,19 +936,570 @@ export class ResultCard {
       <img class="cq-logo-img" src="${LOGO_DATA_URL}" alt="CodeQuest" />
       <span class="cq-title">CodeQuest AI</span>
       ${badge}
-      <button class="cq-close" id="cq-close-btn">×</button>
+      <button class="cq-minimize" id="cq-minimize-btn" title="Minimize">&#8211;</button>
+      <button class="cq-close" id="cq-close-btn">&#215;</button>
     </div>`;
   }
 
   private tabs(): string {
     const t = [
-      { id: "verdict", lbl: "Debug" }, { id: "explain", lbl: "Explain" }, { id: "trace", lbl: "Trace" },
-      { id: "hints",   lbl: "Hints" }, { id: "hiddentests", lbl: "Hidden" },
-      { id: "chat",    lbl: "Chat"  },
+      { id: "codeexplain",  lbl: "Explain"   },
+      { id: "approach",     lbl: "Approach"   },
+      { id: "visualize",    lbl: "Visualize"  },
+      { id: "verdict",      lbl: "Debug"      },
+      { id: "trace",        lbl: "Trace"      },
+      { id: "hints",        lbl: "Hints"      },
+      { id: "hiddentests",  lbl: "Hidden"     },
+      { id: "chat",         lbl: "Chat"       },
     ];
     return `<div class="cq-tabs">${t.map((x) =>
       `<button class="cq-tab${this.activeTab === x.id ? " active" : ""}" data-tab="${x.id}">${x.lbl}</button>`
     ).join("")}</div>`;
+  }
+
+  // ── Code Explain tab (step-by-step code walkthrough) ────────────────────────
+
+  private codeExplainTab(res: AnalyzeResponse): string {
+    const slug = this.slug;
+    const isTS  = slug.includes("two-sum");
+    const isBin = slug.includes("binary-search");
+    const lang  = this.submittedLang || "python";
+    const langLabel = lang === "python3" ? "Python" : lang === "java" ? "Java" : lang === "cpp" ? "C++" : lang;
+
+    // ── Step content based on problem ──────────────────────────────────────────
+    const overview = isTS
+      ? `This code solves the <strong>Two Sum</strong> problem. The goal is to find two different indices <span class="ic">i</span> and <span class="ic">j</span> in the array <span class="ic">nums</span> such that <span class="ic">nums[i] + nums[j]</span> equals the <span class="ic">target</span>, and return the indices.`
+      : isBin
+      ? `This code solves the <strong>Binary Search</strong> problem. We are given a sorted array <span class="ic">nums</span> and a <span class="ic">target</span> value. The goal is to return the index of <span class="ic">target</span> in <span class="ic">O(log n)</span> time, or <span class="ic">-1</span> if not found.`
+      : (res.explanation?.substring(0, 220) ?? "This code provides a solution to the problem. Read through the steps below to understand the approach.");
+
+    const howItWorks = isTS
+      ? `<ul class="rules-ul">
+          <li>We use a <strong>hash map</strong> to store each number and its <span class="ic">index</span> as we iterate through the array.</li>
+          <li>For each number <span class="ic">nums[i]</span>, we compute the complement:<br><span class="ic">complement = target - nums[i]</span>.</li>
+          <li>If the complement already exists in the map, we have found the answer. We return the current index <span class="ic">i</span> and the index stored in the map.</li>
+          <li>Otherwise, we store <span class="ic">nums[i]</span> and its index in the map and continue.</li>
+        </ul>`
+      : isBin
+      ? `<ul class="rules-ul">
+          <li>Set two pointers <span class="ic">lo = 0</span> and <span class="ic">hi = len(nums) - 1</span>.</li>
+          <li>While <span class="ic">lo <= hi</span>, compute <span class="ic">mid = (lo + hi) // 2</span>.</li>
+          <li>If <span class="ic">nums[mid] == target</span>, return <span class="ic">mid</span>.</li>
+          <li>If <span class="ic">nums[mid] < target</span>, move <span class="ic">lo = mid + 1</span>; otherwise <span class="ic">hi = mid - 1</span>.</li>
+        </ul>`
+      : `<ul class="rules-ul">
+          <li>Read through each line carefully and map the logic to the problem statement.</li>
+          <li>Identify the core data structure(s) being used.</li>
+          <li>Trace through with the first example input to verify correctness.</li>
+        </ul>`;
+
+    // ── Code block ────────────────────────────────────────────────────────────
+    const codeRaw = this.submittedCode
+      || (isTS
+        ? `def twoSum(nums, target):\n    seen = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in seen:\n            return [seen[complement], i]\n        seen[num] = i`
+        : isBin
+        ? `def search(nums, target):\n    lo, hi = 0, len(nums) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if nums[mid] == target:\n            return mid\n        elif nums[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1`
+        : `# Your submitted code will appear here.`);
+
+    const codeHl = this.highlightPython(codeRaw);
+
+    // ── Complexity ────────────────────────────────────────────────────────────
+    const timeText = isTS
+      ? `<span class="cplx-pill">O(n)</span><span class="cplx-desc">— We iterate through the array once, and each hash map operation (insert and lookup) takes <span class="cplx-pill">O(1)</span> on average.</span>`
+      : isBin
+      ? `<span class="cplx-pill">O(log n)</span><span class="cplx-desc">— Each iteration halves the search space, giving logarithmic time.</span>`
+      : `<span class="cplx-pill">O(?)</span><span class="cplx-desc">— Complexity depends on your approach. Analyze nested loops and recursive depth.</span>`;
+
+    const spaceText = isTS
+      ? `<span class="cplx-pill">O(n)</span><span class="cplx-desc">— In the worst case, we store all numbers in the hash map.</span>`
+      : isBin
+      ? `<span class="cplx-pill">O(1)</span><span class="cplx-desc">— We use only two pointer variables; no extra space proportional to input.</span>`
+      : `<span class="cplx-pill">O(?)</span><span class="cplx-desc">— Consider any auxiliary data structures you allocate.</span>`;
+
+    const isActive = this.activeTab === "codeexplain";
+    return `<div class="cq-tab-panel${isActive ? " active" : ""}" id="tab-codeexplain">
+      <div class="cexp-outer">
+        <div class="cexp-hero">
+          <div class="cexp-hero-left">
+            <div class="cexp-hero-icon">📖</div>
+            <div>
+              <div class="cexp-hero-title">Explain</div>
+              <div class="cexp-hero-sub">Understand the selected code and its logic.</div>
+            </div>
+          </div>
+          <button class="listen-btn" id="cq-speak-codeexplain">🔊 Listen</button>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row"><div class="vstep-num">1</div><div class="vstep-title">Overview</div></div>
+            <div class="vstep-desc">${overview}</div>
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row"><div class="vstep-num">2</div><div class="vstep-title">How it works</div></div>
+            <div class="vstep-desc">${howItWorks}</div>
+            <div class="cexp-code-wrap">
+              <div class="cexp-code-header">
+                <span class="cexp-code-lang">${langLabel} (Example)</span>
+                <button class="cexp-copy-btn" id="cq-copy-code">&#8944; Copy</button>
+              </div>
+              <div class="cexp-code-body" id="cq-code-body">${codeHl}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row"><div class="vstep-num">3</div><div class="vstep-title">Time Complexity</div></div>
+            <div class="vstep-desc">${timeText}</div>
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row"><div class="vstep-num">4</div><div class="vstep-title">Space Complexity</div></div>
+            <div class="vstep-desc">${spaceText}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /** Very-light Python syntax highlighter for the code block */
+  private highlightPython(code: string): string {
+    const kws = ["def","for","if","elif","else","return","in","while","class","import","from","and","or","not","None","True","False","lambda","pass","break","continue"];
+    // Escape HTML first
+    let h = code.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    // Comments
+    h = h.replace(/(#[^\n]*)/g, `<span class="cc">$1</span>`);
+    // Strings
+    h = h.replace(/('[^']*'|"[^"]*")/g, `<span class="cs">$1</span>`);
+    // Keywords (whole-word only)
+    kws.forEach((kw) => {
+      h = h.replace(new RegExp(`\\b(${kw})\\b(?![^<]*>)`, "g"), `<span class="ck">$1</span>`);
+    });
+    // Numbers
+    h = h.replace(/\b(\d+)\b(?![^<]*>)/g, `<span class="cn">$1</span>`);
+    // Function names after def
+    h = h.replace(/(<span class="ck">def<\/span>\s+)(\w+)/g, `$1<span class="cf">$2</span>`);
+    return h;
+  }
+
+  // ── Approach tab ──────────────────────────────────────────────────────────────
+
+  private approachTab(res: AnalyzeResponse): string {
+    const slug  = this.slug;
+    const isTS  = slug.includes("two-sum");
+    const isBin = slug.includes("binary-search");
+
+    const approaches = isTS ? [
+      { num: 1, name: "Brute Force",         diff: "beg", diffLbl: "Beginner",     baseline: true,  best: false,
+        time: "O(n\xB2)", space: "O(1)", idea: "Check every pair of elements and see if they sum to the target.", why: "" },
+      { num: 2, name: "Hash Map Lookup",     diff: "int", diffLbl: "Intermediate", baseline: false, best: true,
+        time: "O(n)",   space: "O(n)", idea: "Use a hash map to store each number's index. For each element, check if its complement exists.",
+        why: "Builds on your Hash Table strength while solving Two Sum optimally." },
+      { num: 3, name: "Sort + Two Pointers", diff: "adv", diffLbl: "Advanced",     baseline: false, best: false,
+        time: "O(n log n)", space: "O(1)", idea: "Sort the array and use two pointers converging from both ends.", why: "" },
+    ] : isBin ? [
+      { num: 1, name: "Linear Search",          diff: "beg", diffLbl: "Beginner",     baseline: true,  best: false,
+        time: "O(n)",      space: "O(1)", idea: "Iterate through the array and return the index when element equals target.", why: "" },
+      { num: 2, name: "Binary Search",           diff: "int", diffLbl: "Intermediate", baseline: false, best: true,
+        time: "O(log n)",  space: "O(1)", idea: "Use two pointers lo/hi. Compute mid, compare with target, and narrow search range.",
+        why: "Optimal for sorted arrays — halves search space each iteration." },
+      { num: 3, name: "Recursive Binary Search", diff: "adv", diffLbl: "Advanced",     baseline: false, best: false,
+        time: "O(log n)",  space: "O(log n)", idea: "Same logic as iterative, but implemented recursively with call stack overhead.", why: "" },
+    ] : [
+      { num: 1, name: "Brute Force",            diff: "beg", diffLbl: "Beginner",     baseline: true,  best: false,
+        time: "O(n\xB2)", space: "O(n)", idea: "Try all combinations. Usually too slow but a good starting baseline.", why: "" },
+      { num: 2, name: "Optimized (Hashing)",    diff: "int", diffLbl: "Intermediate", baseline: false, best: true,
+        time: "O(n)",   space: "O(n)", idea: "Use a hash map or sort the input to reduce redundant comparisons.",
+        why: "Usually the expected approach for interview problems at this difficulty." },
+      { num: 3, name: "Space-Optimized",        diff: "adv", diffLbl: "Advanced",     baseline: false, best: false,
+        time: "O(n)",   space: "O(1)", idea: "Reduce auxiliary space by mutating the input or using bit manipulation.", why: "" },
+    ];
+
+    const bestApp = approaches.find((a) => a.best)!;
+
+    const thinkSteps = isTS ? [
+      { label: "Identify the goal",       hint: "What two values are we searching for in the array?" },
+      { label: "Choose a data structure", hint: "What structure lets us check if a value exists in O(1)?" },
+      { label: "Handle the complement",   hint: "For each element, what value do we need to have seen before?" },
+    ] : isBin ? [
+      { label: "Define the window",    hint: "What should the lo and hi pointers represent?" },
+      { label: "Compute the midpoint", hint: "How do you avoid integer overflow when computing mid?" },
+      { label: "Narrow the search",    hint: "When should you move lo vs hi?" },
+    ] : [
+      { label: "Understand the constraints", hint: "What are the input size limits? Does that rule out O(n^2)?" },
+      { label: "Pick your structure",        hint: "Would a hash map, stack, or two-pointer approach help?" },
+      { label: "Handle edge cases",          hint: "What happens with empty input, duplicates, or boundary values?" },
+    ];
+
+    const approachHtml = approaches.map((a) =>
+      `<div class="approach-card${a.best ? " best" : ""}">
+        <div class="approach-num${a.best ? " best" : ""}">${a.num}</div>
+        <div class="approach-body">
+          <div class="approach-name-row">
+            <span class="approach-name">${a.name}</span>
+            <span class="apr-diff-badge ${a.diff}">${a.diffLbl}</span>
+            ${a.baseline ? `<span class="apr-baseline-badge">Baseline</span>` : ""}
+            ${a.best     ? `<span class="apr-best-badge">&#9733; Best for you</span>` : ""}
+          </div>
+          <div class="approach-meta">Time: ${a.time} &nbsp;&bull;&nbsp; Space: ${a.space}</div>
+          <div class="approach-idea"><strong>Idea:</strong> ${a.idea}</div>
+          ${a.why ? `<div class="approach-why"><strong>Why recommended:</strong> ${a.why}</div>` : ""}
+        </div>
+        <button class="approach-steps-btn ${a.best ? "best" : "normal"}">View steps</button>
+      </div>`
+    ).join("");
+
+    const thinkHtml = thinkSteps.map((s, i) =>
+      `<div class="think-step">
+        <div class="think-num">${i + 1}</div>
+        <div class="think-text"><strong>${s.label}</strong> &mdash; ${s.hint}</div>
+      </div>`
+    ).join("");
+
+    const whyItWorks = isTS
+      ? "Each number is visited once and looked up in O(1) via the hash map."
+      : isBin ? "Search space halves each iteration, at most log2(n) steps needed."
+      : "The optimal approach avoids redundant work by leveraging structure in the input.";
+
+    const confBooster = isTS
+      ? `You've solved "Contains Duplicate" recently — this uses a similar Hash Map idea, extended to track indices.`
+      : isBin ? `You've used two pointers before — Binary Search is the same idea applied to a sorted array.`
+      : `This problem pattern appears in many of your recent solves. You already have the building blocks.`;
+
+    const profileName = slug.split("-").map((w: string) => (w[0] ?? "").toUpperCase() + w.slice(1)).join("");
+    const isActive = this.activeTab === "approach";
+    return `<div class="cq-tab-panel${isActive ? " active" : ""}" id="tab-approach">
+      <div class="cexp-outer">
+        <div class="apr-hero">
+          <div class="apr-hero-left">
+            <div class="apr-hero-icon">&#128214;</div>
+            <div>
+              <div class="apr-hero-title">Personalized Approach</div>
+              <div class="apr-hero-sub">Choose the strategy that fits your problem-solving habits.</div>
+            </div>
+          </div>
+          <button class="listen-btn" id="cq-speak-approach">&#128266; Listen</button>
+        </div>
+
+        <div class="tab-desc-card">
+          <div class="tab-desc-card-title">Personalized Strategy Guide</div>
+          <div class="tab-desc-card-sub">Recommends the best algorithmic approach based on your LeetCode profile, difficulty level, and known strengths. Includes a thinking guide and complexity summary.</div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row">
+              <div class="apr-sec-icon">&#128100;</div>
+              <div class="apr-sec-title">Your LeetCode Profile</div>
+              <span class="apr-sync">&#8635; Last synced: just now</span>
+            </div>
+            <div class="apr-profile-name">${profileName}</div>
+            <div class="apr-badges">
+              <span class="apr-badge inter">Intermediate</span>
+              <span class="apr-badge lang">Python3</span>
+            </div>
+            <div class="apr-solved"><strong>142</strong> Solved <span class="apr-easy">Easy: 90</span><span class="apr-med">Medium: 50</span><span class="apr-hard">Hard: 2</span></div>
+            <div class="apr-topics-row">
+              <div class="apr-topics-col">
+                <div class="apr-topics-label">Strong Topics</div>
+                <div>
+                  <span class="apr-chip strong">Array</span><span class="apr-chip strong">Hash Table</span>
+                  <span class="apr-chip strong">String</span><span class="apr-chip strong">Two Pointers</span>
+                </div>
+              </div>
+              <div class="apr-topics-col">
+                <div class="apr-topics-label">Growth Areas</div>
+                <div>
+                  <span class="apr-chip growth">Dynamic Programming</span>
+                  <span class="apr-chip growth">Sliding Window</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row">
+              <div class="apr-sec-icon">&#128202;</div>
+              <div>
+                <div class="apr-sec-title">Pattern Insights</div>
+                <div class="apr-sec-sub">Analysis based on your solved problems and recent activity.</div>
+              </div>
+            </div>
+            <div class="apr-patterns">
+              <div class="apr-pattern-card">
+                <div class="apr-pattern-row">
+                  <div class="apr-pat-icon"><span class="apr-pat-check">&#10003;</span></div>
+                  <span class="apr-pattern-name">${isTS ? "Hash Set lookup" : isBin ? "Binary Search" : "Core Pattern"}</span>
+                  <span class="apr-pat-badge strong">Strong</span>
+                </div>
+                <div class="apr-pattern-sub">You have 41 Hash Table solves.</div>
+              </div>
+              <div class="apr-pattern-card">
+                <div class="apr-pattern-row">
+                  <div class="apr-pat-icon"><div class="apr-pat-dot"></div></div>
+                  <span class="apr-pattern-name">${isTS ? "Sliding Window" : isBin ? "Two Pointers" : "Growth Pattern"}</span>
+                  <span class="apr-pat-badge growth">Growth Area</span>
+                </div>
+                <div class="apr-pattern-sub">You have 3 solves in this pattern.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row">
+              <div class="apr-sec-icon">&#128196;</div>
+              <div>
+                <div class="apr-sec-title">Available Approaches</div>
+                <div class="apr-sec-sub">Main approaches with recommendations for you.</div>
+              </div>
+            </div>
+            ${approachHtml}
+          </div>
+        </div>
+
+        <div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row">
+              <div class="apr-sec-icon">&#128161;</div>
+              <div>
+                <div class="apr-sec-title">Step-by-Step Thinking Guide</div>
+                <div class="apr-sec-sub">Try to answer these before looking at the full solution.</div>
+              </div>
+            </div>
+            <div class="think-steps">${thinkHtml}</div>
+          </div>
+        </div>
+
+        <div class="apr-bottom">
+          <div class="apr-complexity-card">
+            <div class="apr-complexity-label">&#9203; Complexity Summary</div>
+            <div class="apr-complexity-sub">For the recommended approach (${bestApp.name}).</div>
+            <div class="apr-cmplx-row">
+              <div class="apr-cmplx-col">
+                <div class="apr-cmplx-name">Time Complexity</div>
+                <div class="apr-cmplx-val time">${bestApp.time}</div>
+              </div>
+              <div class="apr-cmplx-col">
+                <div class="apr-cmplx-name">Space Complexity</div>
+                <div class="apr-cmplx-val space">${bestApp.space}</div>
+              </div>
+            </div>
+            <div class="apr-cmplx-why"><strong>Why it works:</strong> ${whyItWorks}</div>
+          </div>
+          <div class="apr-confidence-card">
+            <div class="apr-conf-check">&#10003;</div>
+            <div>
+              <div class="apr-conf-title">Confidence Booster</div>
+              <div class="apr-conf-text">${confBooster}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ── Visualize / Visual Explanation tab ───────────────────────────────────────
+
+  // ── Visualize / Visual Explanation tab ───────────────────────────────────────
+
+  private visualizeTab(res: AnalyzeResponse): string {
+    // Parse first example input for array visualization
+    const exInput = (res.results ?? []).find((r: TestResult) => r.kind === "example")?.input ?? "";
+    const { arr, target, highlight } = this.parseArrayInput(exInput, res);
+    const hasArr = arr.length > 0;
+    const slug = this.slug;
+    const isTS = slug.includes("two-sum");
+    const isBin = slug.includes("binary-search");
+    const explanation = res.explanation ?? "";
+
+    const arrVizBase = hasArr ? this.renderArr(arr, []) : "";
+    const arrVizHL  = hasArr ? this.renderArr(arr, highlight) : "";
+    const arrVizOut = hasArr ? this.renderArr(arr, [0, 1]) : "";
+
+    // Steps
+    const steps = [
+      {
+        num: 1, title: "Input and Goal",
+        desc: isTS
+          ? `We are given an array <span class="ic">nums</span> and a target sum.<br>We need to find two indices <span class="ic">i</span> and <span class="ic">j</span> such that<br><span class="ic">nums[i] + nums[j] = target</span>.`
+          : isBin
+          ? `We are given a <strong>sorted</strong> array <span class="ic">nums</span> and a <span class="ic">target</span>.<br>We need to return the index of <span class="ic">target</span>, or <span class="ic">-1</span> if not found.`
+          : explanation.length > 40
+          ? explanation.substring(0, 160) + "…"
+          : `Understand the inputs and what the problem is asking you to return.`,
+        viz: hasArr ? `${arrVizBase}<div class="target-pill" style="margin-top:6px">target = ${target ?? "?"}</div>` : this.vizPlaceholder(),
+      },
+      {
+        num: 2, title: isTS ? "Find a valid pair" : isBin ? "Narrow the search" : "Core approach",
+        desc: isTS
+          ? `Look for two numbers whose sum is equal to the <span class="ic">target (${target ?? "?"})</span>. Here, <span class="ic">${arr[highlight[0]] ?? "?"}</span> and <span class="ic">${arr[highlight[1]] ?? "?"}</span> add up to ${target ?? "?"}.`
+          : isBin
+          ? `Use two pointers <span class="ic">lo</span> and <span class="ic">hi</span>. Check the middle element — if it equals target, return; otherwise narrow the range.`
+          : `Think about the most efficient strategy. Avoid nested loops where possible — consider hashing, sorting, or a two-pointer approach.`,
+        viz: hasArr
+          ? `${arrVizHL}<div class="sum-pill" style="margin-top:6px">${arr[highlight[0]] ?? "?"} + ${arr[highlight[1]] ?? "?"} = ${target ?? "?"}<br>= target</div>`
+          : this.vizPlaceholder(),
+      },
+      {
+        num: 3, title: "Return the result",
+        desc: isTS
+          ? `The indices of <span class="ic">${arr[highlight[0]] ?? "?"}</span> and <span class="ic">${arr[highlight[1]] ?? "?"}</span> are <span class="ic">0</span> and <span class="ic">1</span>.<br>So the answer is <span class="ic">[${highlight.join(", ")}]</span>.`
+          : isBin
+          ? `When <span class="ic">nums[mid] === target</span>, return <span class="ic">mid</span>. If the loop ends without a match, return <span class="ic">-1</span>.`
+          : `Make sure you return the correct type and format as specified in the problem output section.`,
+        viz: hasArr
+          ? `${arrVizOut}<div class="output-pill" style="margin-top:6px">✓ Output: [${highlight.join(", ")}]</div>`
+          : this.vizPlaceholder(),
+      },
+      {
+        num: 4, title: "Key rules to remember",
+        desc: isTS
+          ? `<ul class="rules-ul">
+              <li>Each input will have exactly one solution.</li>
+              <li>You may not use the same element twice.</li>
+              <li>You can return the indices in any order.</li>
+              <li>The array can contain positive, negative, or zero values.</li>
+            </ul>
+            <div class="key-insight">
+              <div class="ki-icon">💡</div>
+              <div><div class="ki-title">Key Insight</div>
+              <div class="ki-text">We return the <em>indices</em> (positions) of the two numbers, not the numbers themselves.</div></div>
+            </div>`
+          : `<ul class="rules-ul">
+              <li>Read the constraints carefully — they define edge cases.</li>
+              <li>Consider empty arrays, single elements, and boundary values.</li>
+              <li>Check whether indices or values should be returned.</li>
+            </ul>
+            <div class="key-insight">
+              <div class="ki-icon">💡</div>
+              <div><div class="ki-title">Key Insight</div>
+              <div class="ki-text">Edge cases are where most solutions fail. Test explicitly for empty input and min/max values.</div></div>
+            </div>`,
+        viz: null,
+      },
+      {
+        num: 5, title: "Final understanding",
+        desc: isTS
+          ? `<div class="final-inner"><span class="final-check">✅</span><div class="final-text">In short, you need to find two <strong>different indices</strong> <span class="ic">i</span> and <span class="ic">j</span> such that<br><span class="ic">nums[i] + nums[j] = target</span> and return <span class="ic">[i, j]</span>.</div></div>`
+          : `<div class="final-inner"><span class="final-check">✅</span><div class="final-text">${explanation.length > 40 ? explanation : "Make sure your solution handles all edge cases and returns the correct output format as specified."}</div></div>`,
+        viz: null,
+      },
+    ];
+
+    const stepsHtml = steps.map((step) => {
+      if (step.viz === null) {
+        return `<div class="vstep-card">
+          <div class="vstep-full">
+            <div class="vstep-num-row">
+              <div class="vstep-num">${step.num}</div>
+              <div class="vstep-title">${step.title}</div>
+            </div>
+            <div class="vstep-desc">${step.desc}</div>
+          </div>
+        </div>`;
+      }
+      return `<div class="vstep-card">
+        <div class="vstep-body">
+          <div class="vstep-left">
+            <div class="vstep-num-row">
+              <div class="vstep-num">${step.num}</div>
+              <div class="vstep-title">${step.title}</div>
+            </div>
+            <div class="vstep-desc">${step.desc}</div>
+          </div>
+          <div class="vstep-right">${step.viz}</div>
+        </div>
+      </div>`;
+    }).join("");
+
+    const isActive = this.activeTab === "visualize";
+    return `<div class="cq-tab-panel${isActive ? " active" : ""}" id="tab-visualize">
+      <div class="explain-outer">
+        <div class="explain-hero">
+          <div class="explain-hero-left">
+            <div class="explain-hero-icon">&#128301;</div>
+            <div>
+              <div class="explain-hero-title">Visual Explanation</div>
+              <div class="explain-hero-sub">Let&#39;s understand this problem step by step with visuals.</div>
+            </div>
+          </div>
+          <button class="listen-btn" id="cq-speak-visualize">&#128266; Listen</button>
+        </div>
+
+        <div class="tab-desc-card">
+          <div class="tab-desc-card-title">Step-by-Step Visual Walkthrough</div>
+          <div class="tab-desc-card-sub">Breaks the problem into clear visual steps — input setup, core approach with highlighted array elements, expected output, key rules, and a final summary.</div>
+        </div>
+
+        ${stepsHtml}
+        <div id="cq-visualize-img-slot" style="display:none">
+          <div class="viz-img-slot" id="cq-visualize-ai-img">&#9203; AI visual loading&#8230;</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // ── Array parsing + rendering helpers ─────────────────────────────────────────
+
+  private parseArrayInput(input: string, res: AnalyzeResponse): { arr: number[]; target: number | null; highlight: number[] } {
+    try {
+      // Try to parse "nums = [2,7,11,15], target = 9"
+      const arrMatch = input.match(/\[([\d,\s-]+)\]/);
+      const tgtMatch = input.match(/target\s*=\s*([\d-]+)/);
+      if (arrMatch) {
+        const arr = arrMatch[1].split(",").map((x) => parseInt(x.trim(), 10)).filter((n) => !isNaN(n));
+        const target = tgtMatch ? parseInt(tgtMatch[1], 10) : null;
+        // Find pair that sums to target
+        const highlight: number[] = [];
+        if (target !== null) {
+          outer: for (let i = 0; i < arr.length; i++) {
+            for (let j = i + 1; j < arr.length; j++) {
+              if (arr[i] + arr[j] === target) { highlight.push(i, j); break outer; }
+            }
+          }
+        }
+        if (!highlight.length && arr.length >= 2) highlight.push(0, 1);
+        return { arr, target, highlight };
+      }
+    } catch { /* ignore */ }
+    // Fall back to checking expected output
+    const exp = (res.results ?? []).find((r: TestResult) => r.kind === "example")?.expected;
+    if (typeof exp === "string") {
+      const m = exp.match(/\[([\d,\s]+)\]/);
+      if (m) {
+        const idxs = m[1].split(",").map(Number);
+        return { arr: [], target: null, highlight: idxs };
+      }
+    }
+    return { arr: [], target: null, highlight: [0, 1] };
+  }
+
+  private renderArr(arr: number[], highlight: number[]): string {
+    if (!arr.length) return "";
+    const cells = arr.map((v, i) => {
+      const cls = highlight.includes(i) ? (highlight.indexOf(i) === 0 ? " hl" : " hl2") : "";
+      return `<span class="arr-cell${cls}">${v}</span>`;
+    }).join(`<span class="arr-sep">,</span>`);
+    const idxs = arr.map((_, i) => `<span class="arr-idx">${i}</span>`).join("");
+    return `<div class="arr-viz">
+      <div class="arr-header-row">nums =</div>
+      <div class="arr-cells-row"><span class="arr-brk">[</span>${cells}<span class="arr-brk">]</span></div>
+      <div class="arr-idx-row">${idxs}</div>
+    </div>`;
+  }
+
+  private vizPlaceholder(): string {
+    return `<div class="viz-img-slot">📊<br>Visual<br>Diagram</div>`;
   }
 
   // ── Debug tab ───────────────────────────────────────────────────────────────
@@ -736,16 +1556,6 @@ export class ResultCard {
         ${rows}
         ${diagHtml}
         ${flagsHtml}
-        <div class="expl-card">
-          <div class="expl-head">
-            <div class="diag-ico-box">🤖</div>
-            <span class="diag-head-lbl">AI Debug Report</span>
-          </div>
-          <div class="expl-body" id="cq-ai-debug">
-            <button class="ht-gen-btn" id="cq-ai-debug-btn">Run AI analysis</button>
-            <span style="font-size:.7rem;color:#9ca3af;margin-left:6px;">Root cause and fix steps in words. No full solution.</span>
-          </div>
-        </div>
         <div class="expl-card">
           <div class="expl-head">
             <div class="diag-ico-box">📝</div>
@@ -808,9 +1618,7 @@ export class ResultCard {
         <span class="sec-title">Variable Trace</span>
         <button class="listen-btn" id="cq-speak-trace">🔊 Listen</button>
       </div>
-      <div class="trace-outer">${darkCard}
-        <div id="cq-crew-trace" class="expl-card" style="margin-top:10px;"><div class="expl-body" style="color:#9ca3af">Open this tab to record a real step-by-step execution trace…</div></div>
-      </div>
+      <div class="trace-outer">${darkCard}</div>
     </div>`;
   }
 
@@ -872,221 +1680,39 @@ export class ResultCard {
     </div>`;
   }
 
-  // ── Explain tab: problem URL + LeetCode username -> the backend fetches the problem and explains it ──────
-
-  private explainTab(): string {
-    return `<div class="cq-tab-panel${this.activeTab === "explain" ? " active" : ""}" id="tab-explain">
-      <div class="sec-head">
-        <span class="sec-title">Explain Problem</span>
-        <button class="listen-btn" id="cq-speak-explain">🔊 Listen</button>
-      </div>
-      <div class="hidden-outer">
-        <div class="ht-intro-card" style="flex-direction:column;align-items:stretch;gap:6px;">
-          <label style="font-size:.7rem;font-weight:600;color:#6b7280">Problem link</label>
-          <input class="chat-input" id="cq-ex-url" type="text" placeholder="https://leetcode.com/problems/two-sum/" style="width:100%;box-sizing:border-box" />
-          <label style="font-size:.7rem;font-weight:600;color:#6b7280">LeetCode username (optional, personalises the explanation)</label>
-          <input class="chat-input" id="cq-ex-user" type="text" placeholder="your public LeetCode username" style="width:100%;box-sizing:border-box" />
-          <div style="font-size:.66rem;color:#9ca3af">Entering a username lets CodeQuest read your PUBLIC LeetCode profile (solved counts, languages). Leave it empty to skip. You can withdraw this from Chat → Profile access.</div>
-          <button class="ht-gen-btn" id="cq-ex-run">📖 Explain this problem</button>
-        </div>
-        <div id="cq-ex-out"><div class="cq-empty">Paste a problem link (the current page is filled in) and press Explain.</div></div>
-      </div>
-    </div>`;
-  }
-
-  private problemUrl(): string {
-    const m = location.pathname.match(/\/problems\/([^/?#]+)/);
-    return m ? `https://leetcode.com/problems/${m[1]}/` : "";
-  }
-
-  /** Fill the inputs once: current page URL and the username already authorised (if any). */
-  private async prefillExplain(): Promise<void> {
-    const url = this.shadow.getElementById("cq-ex-url") as HTMLInputElement | null;
-    const user = this.shadow.getElementById("cq-ex-user") as HTMLInputElement | null;
-    if (url && !url.value) url.value = this.problemUrl();
-    if ((!url?.value || !user?.value)) { // fall back to what the backend stored the last time (shared by all tabs)
-      try {
-        const c = (await chrome.runtime.sendMessage({ type: "GET_CONTEXT" }) as { context?: { problem_url: string; leetcode_username: string | null } | null } | null)?.context;
-        if (c && url && !url.value) url.value = c.problem_url;
-        if (c?.leetcode_username && user && !user.value) user.value = c.leetcode_username;
-      } catch { /* offline */ }
-    }
-    if (user && !user.value) {
-      try {
-        const st = await chrome.runtime.sendMessage({ type: "CHAT_STATUS" }) as { granted?: boolean; leetcode_username?: string | null } | null;
-        if (st?.granted && st.leetcode_username) user.value = st.leetcode_username;
-      } catch { /* offline: leave empty */ }
-    }
-  }
-
-  /** Run the explanation. `selected` = text the learner highlighted on the page (explained first). */
-  private async runExplain(selected?: string): Promise<void> {
-    const out = this.shadow.getElementById("cq-ex-out");
-    const btn = this.shadow.getElementById("cq-ex-run") as HTMLButtonElement | null;
-    const url = (this.shadow.getElementById("cq-ex-url") as HTMLInputElement | null)?.value.trim() ?? "";
-    const username = (this.shadow.getElementById("cq-ex-user") as HTMLInputElement | null)?.value.trim() ?? "";
-    if (!out || this.explainBusy) return;
-    if (!url) { out.innerHTML = `<div class="cq-error">Enter a LeetCode problem link first.</div>`; return; }
-    this.explainBusy = true;
-    if (btn) { btn.disabled = true; btn.textContent = "⏳ Fetching the problem…"; }
-    out.innerHTML = `<div class="cq-loading" style="height:140px"><div class="cq-spinner"></div><span>Fetching the problem and preparing the explanation…</span></div>`;
-    let r: (ExplainProblemResponse & { error?: string }) | null = null;
-    try { r = await chrome.runtime.sendMessage({ type: "EXPLAIN_PROBLEM", body: { url, username: username || undefined, selected_text: selected || undefined, code: this.reviewCode || undefined, language: this.reviewLang || undefined } }); } catch { r = null; }
-    this.explainBusy = false;
-    if (btn) { btn.disabled = false; btn.textContent = "📖 Explain this problem"; }
-    if (!r || r.error || !r.explanation) {
-      const why = r?.error ? esc(r.error.replace(/^\d+ [^:]*:\s*/, "").slice(0, 220)) : "backend unreachable";
-      out.innerHTML = `<div class="cq-error"><strong>Could not explain the problem</strong><br><small>${why}</small></div>`;
-      return;
-    }
-    const e = r.explanation, p = r.problem;
-    const list = (a: string[]) => a.length ? `<ul style="margin:4px 0 0 16px;padding:0">${a.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
-    const sec = (title: string, body: string) => body.trim() ? `<div style="margin-top:8px"><b>${title}</b><div>${body}</div></div>` : "";
-    this.explainText = [e.what_is_asked, e.input_meaning, e.output_meaning, ...e.constraints_and_conditions].filter(Boolean).join(". ");
-    out.innerHTML = `<div class="expl-card">
-      <div class="expl-head"><div class="diag-ico-box">📖</div><span class="diag-head-lbl">${esc(p.title)} · ${esc(p.difficulty)}</span></div>
-      <div class="expl-body">
-        <div style="font-size:.7rem;color:#6b7280">${p.tags.map(esc).join(" · ")}</div>
-        ${selected ? `<div style="margin-top:6px;font-size:.72rem;background:#fffbeb;border-radius:6px;padding:6px">You highlighted: “${esc(selected.slice(0, 200))}”</div>` : ""}
-        ${sec("What it asks", esc(e.what_is_asked))}
-        ${sec("Input", esc(e.input_meaning))}
-        ${sec("Output", esc(e.output_meaning))}
-        ${sec("Constraints", list(e.constraints_and_conditions))}
-        ${sec("Examples", list(e.examples_walkthrough))}
-        ${sec("Your code", e.code_relation ? esc(e.code_relation) + (e.code_solves_problem !== "unclear" ? ` <i>(solves it: ${e.code_solves_problem})</i>` : "") : "")}
-        ${sec("Mismatches", list(e.mismatches))}
-        <div style="font-size:.66rem;color:#9ca3af;margin-top:10px">${r.source === "fetched" ? "Problem fetched from LeetCode." : "Using the copy captured earlier (LeetCode unreachable)."}
-          ${r.personalised ? ` Personalised for ${esc(r.username ?? "you")}.` : ""}${r.llm_used ? "" : " AI model unavailable: showing the problem's own text."}
-          ${r.notes.map((n) => " " + esc(n)).join("")}</div>
-      </div></div>`;
-  }
-
-  /** Toolbar "Explain": open this tab, fill in the page URL and run immediately. */
-  openExplain(selected?: string): void {
-    const slug = location.pathname.match(/\/problems\/([^/?#]+)/)?.[1] ?? "";
-    if (!this.response) {
-      const idle: AnalyzeResponse = { attempt_id: 0, verified: "unverified", results: [], diagnosis: null, explanation: null, flags: [], allowed_hint_level: 1 };
-      this.showResults(idle, slug, undefined, undefined, "explain");
-    } else this.switchTab("explain");
-    void this.prefillExplain().then(() => this.runExplain(selected));
-  }
-
   // ── Hidden Tests tab ─────────────────────────────────────────────────────────
 
   private hiddenTab(): string {
     return `<div class="cq-tab-panel${this.activeTab === "hiddentests" ? " active" : ""}" id="tab-hiddentests">
       <div class="sec-head">
-        <span class="sec-title">Generated Test Cases</span>
+        <span class="sec-title">Hidden Test Cases</span>
         <button class="listen-btn" id="cq-speak-hidden">🔊 Listen</button>
       </div>
       <div class="hidden-outer">
         <div class="ht-intro-card">
-          <div class="ht-intro-text" id="cq-hidden-info">AI-generated edge cases and boundaries, run against <strong>your code</strong> in the secure sandbox. These are generated tests, not LeetCode's official hidden tests.</div>
+          <div class="ht-intro-text">These test cases go beyond the examples — they test your code against <strong>rigorous edge conditions and constraint boundaries</strong> that a naive solution will fail. Your implementation must handle all of them correctly.</div>
           <button class="ht-gen-btn" id="cq-gen-hidden">⚡ Regenerate</button>
         </div>
         <div id="cq-hidden-results">
-          <div class="cq-empty">Open this tab to generate test cases…</div>
+          ${this.buildTestCards(this.slug)}
         </div>
       </div>
     </div>`;
   }
 
-  /** The cases currently shown (AI-generated if loaded, else the static fallback set). */
-  private shownCases(): { input: string; expected: string; status?: string; actual?: string; reason?: string }[] {
-    return this.hiddenList
-      ? this.hiddenList.map((c) => ({ input: c.input, expected: c.expected_output, status: c.status, actual: c.actual_output, reason: c.reason }))
-      : this.hiddenCases(this.slug);
-  }
-
-  private buildTestCards(): string {
-    return this.shownCases().map((tc, i) => `
+  private buildTestCards(slug: string): string {
+    const cases = this.hiddenCases(slug);
+    return cases.map((tc, i) => `
       <div class="tc-card">
         <div class="tc-head">
-          <span class="tc-head-lbl">Test Case ${i + 1}${tc.status ? ` · <span style="color:${tc.status === "PASS" ? "#16a34a" : tc.status === "FAIL" ? "#dc2626" : "#9ca3af"}">${tc.status === "NOT_RUN" ? "NOT RUN" : tc.status}</span>` : ""}</span>
-          <button class="tc-copy-btn" data-copy="${esc(tc.input)}" title="Copy input">⧉</button>
+          <span class="tc-head-lbl">Test Case ${i + 1}</span>
+          <button class="tc-copy-btn" data-copy="${tc.input}" title="Copy input">⧉</button>
         </div>
         <div class="tc-body">
-          <div><span class="tc-in">Input: </span><span class="tc-val">${esc(tc.input)}</span></div>
-          <div><span class="tc-out">Expected: </span><span class="tc-val">${esc(tc.expected)}</span></div>
-          ${tc.actual ? `<div><span class="tc-out">Your output: </span><span class="tc-val">${esc(tc.actual)}</span></div>` : ""}
-          ${tc.reason ? `<div style="font-size:.7rem;color:#9ca3af">${esc(tc.reason)}</div>` : ""}
+          <div><span class="tc-in">Input: </span><span class="tc-val">${tc.input}</span></div>
+          <div><span class="tc-out">Expected: </span><span class="tc-val">${tc.expected}</span></div>
         </div>
       </div>`).join("");
-  }
-
-  private wireCopyButtons(): void {
-    this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        navigator.clipboard.writeText((btn as HTMLElement).dataset.copy ?? "").catch(() => {});
-        (btn as HTMLElement).textContent = "✓";
-        setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
-      });
-    });
-  }
-
-  /** Test Case Generator agent: model-written cases, executed in the backend sandbox. Falls back to the static set. */
-  private async loadHidden(): Promise<void> {
-    const out = this.shadow.getElementById("cq-hidden-results");
-    const info = this.shadow.getElementById("cq-hidden-info");
-    const btn = this.shadow.getElementById("cq-gen-hidden") as HTMLButtonElement | null;
-    if (!out || this.hiddenBusy) return;
-    this.hiddenBusy = true;
-    if (btn) { btn.disabled = true; btn.textContent = "⏳ Generating…"; }
-    out.innerHTML = `<div class="cq-loading" style="height:120px"><div class="cq-spinner"></div><span>Generating and running test cases…</span></div>`;
-    const r = await crew<CrewTestReport>("tests", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
-    this.hiddenBusy = false;
-    if (btn) { btn.disabled = false; btn.textContent = "⚡ Regenerate"; }
-    if (r && r.result.test_cases.length) {
-      this.hiddenList = r.result.test_cases;
-      const rep = r.result;
-      const extra = [...rep.failure_analysis.map((t) => `• ${esc(t)}`), ...rep.required_fixes.map((t) => `→ ${esc(t)}`)].join("<br>");
-      this.hiddenInfo = `${esc(rep.disclaimer)}${r.executed ? " Run in the secure sandbox against your code." : " Not executed" + (r.notes[0] ? `: ${esc(r.notes[0])}` : ".")}${r.llm_used ? "" : " (AI model unavailable: using the problem's examples.)"}${extra ? `<div style="margin-top:6px">${extra}</div>` : ""}`;
-    } else {
-      this.hiddenList = null;
-      this.hiddenInfo = "Could not reach the AI test generator (is FEATURE_CREW=1 set on the backend?). Showing a basic edge-case set.";
-    }
-    if (info) info.innerHTML = this.hiddenInfo;
-    out.innerHTML = this.buildTestCards();
-    this.wireCopyButtons();
-    if (!this.hiddenList) this.hiddenList = null; // static fallback stays re-generatable
-  }
-
-  /** Trace Analyst agent: real execution steps from the sandbox + the model's explanation of where it goes wrong. */
-  private async loadCrewTrace(): Promise<void> {
-    const box = this.shadow.getElementById("cq-crew-trace");
-    if (!box || this.traceLoaded || !this.slug) return;
-    this.traceLoaded = true;
-    box.innerHTML = `<div class="expl-body" style="color:#9ca3af">Recording execution trace…</div>`;
-    const r = await crew<CrewTraceReport>("trace", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
-    if (!r) { this.traceLoaded = false; box.innerHTML = `<div class="expl-body" style="color:#9ca3af">Execution trace is unavailable (backend FEATURE_CREW off or offline).</div>`; return; }
-    const t = r.result;
-    const rows = t.steps.slice(0, 60).map((s) => `<tr${t.divergence_step === s.step ? ' style="background:#fef3c7"' : ""}><td>${s.step}</td><td><code>${esc(s.statement)}</code></td><td style="font-size:.7rem">${esc(s.variables)}</td></tr>`).join("");
-    box.innerHTML = `<div class="expl-head"><div class="diag-ico-box">🧭</div><span class="diag-head-lbl">Execution Trace · ${t.trace_source === "actual_runtime" ? "real run" : "AI simulation"}</span></div>
-      <div class="expl-body">
-        <div style="font-size:.72rem;color:#6b7280;margin-bottom:6px">${esc(t.note)}</div>
-        ${t.failure_explanation ? `<div style="margin-bottom:8px">${esc(t.failure_explanation)}</div>` : ""}
-        ${rows ? `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.74rem;width:100%"><tr><th>#</th><th>Statement</th><th>Variables</th></tr>${rows}</table></div>` : ""}
-        ${t.steps.length > 60 ? `<div style="font-size:.7rem;color:#9ca3af">Showing 60 of ${t.steps.length} steps.</div>` : ""}
-      </div>`;
-  }
-
-  /** Debugger agent: root cause and fix steps in words (the corrected full solution is withheld by the backend). */
-  private async runAiDebug(): Promise<void> {
-    const box = this.shadow.getElementById("cq-ai-debug");
-    if (!box) return;
-    box.innerHTML = `<span style="color:#9ca3af">Analysing your code…</span>`;
-    const r = await crew<CrewDebugReport>("debug", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined, attempt_id: this.attemptId || undefined });
-    if (!r) { box.innerHTML = `<span style="color:#9ca3af">AI analysis is unavailable (backend FEATURE_CREW off or offline).</span>`; return; }
-    const d = r.result;
-    const li = (arr: string[]) => arr.length ? `<ul style="margin:4px 0 0 16px;padding:0">${arr.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
-    box.innerHTML = `<div style="font-weight:700">${esc(d.diagnosis)}</div>
-      ${d.bug_types.length ? `<div style="font-size:.7rem;color:#92400e">${d.bug_types.map(esc).join(" · ")}</div>` : ""}
-      ${d.root_cause ? `<div style="margin-top:6px"><b>Root cause:</b> ${esc(d.root_cause)}</div>` : ""}
-      ${d.expected_vs_actual ? `<div style="margin-top:4px"><b>Expected vs actual:</b> ${esc(d.expected_vs_actual)}</div>` : ""}
-      ${d.variable_trace_of_bug ? `<div style="margin-top:4px"><b>Where it goes wrong:</b> ${esc(d.variable_trace_of_bug)}</div>` : ""}
-      ${d.changes_and_reasons.length ? `<div style="margin-top:6px"><b>What to change:</b>${li(d.changes_and_reasons)}</div>` : ""}
-      ${d.corrected_code ? `<pre style="white-space:pre-wrap;font-size:.72rem;background:#f9fafb;padding:8px;border-radius:8px;margin-top:6px">${esc(d.corrected_code)}</pre>` : ""}
-      <div style="font-size:.68rem;color:#9ca3af;margin-top:6px">${r.llm_used ? "" : "AI model unavailable: showing the stored diagnosis. "}${r.executed ? "Checked against the examples in the sandbox." : "Code was not executed."}${r.fix_code_withheld ? " Full solution intentionally not shown." : ""}</div>`;
   }
 
   private hiddenCases(slug: string): { input: string; expected: string }[] {
@@ -1135,12 +1761,11 @@ export class ResultCard {
           <button class="cab" id="cq-cab-explain"><span class="cab-icon">📖</span><span class="cab-label">Explain Problem</span></button>
           <button class="cab" id="cq-cab-debug"><span class="cab-icon">⚙️</span><span class="cab-label">Debug Code</span></button>
           <button class="cab" id="cq-cab-tests"><span class="cab-icon">↗</span><span class="cab-label">Generate Tests</span></button>
-          <button class="cab" id="cq-cab-profile"><span class="cab-icon">🔒</span><span class="cab-label">Profile access</span></button>
         </div>
         <div class="chat-messages" id="cq-chat-messages">
           <div class="chat-bubble">
             <div class="chat-av">AI</div>
-            <div class="chat-text">Hi! I can explain this problem, help you find why your code fails, or give you hints. I will not hand over the full solution.</div>
+            <div class="chat-text">The problem asks for ${slug.includes("two-sum") ? "indices of two numbers that sum to target. Have you considered edge cases?" : "a solution. How can I help you today?"}</div>
           </div>
         </div>
         <div class="chat-input-row">
@@ -1156,20 +1781,25 @@ export class ResultCard {
   private render(): void {
     if (!this.response) return;
     const res = this.response;
-    const warn = this.explanationOnly
-      ? `<div class="cq-warn">ℹ️ ${this.explanationOnly.replace(/[<>&]/g, "")}</div>` : "";
+    const warn = this.unsupportedLang && this.unsupportedLang !== "python3"
+      ? `<div class="cq-warn">⚠️ Mock mode — language <strong>${this.unsupportedLang}</strong> is not yet executed.</div>` : "";
 
     this.panel.innerHTML = `
-      ${this.hdr(res.verified as "oracle-verified" | "unverified" | null)}
-      ${warn}
-      ${this.tabs()}
-      <div class="cq-body">
-        ${this.debugTab(res)}
-        ${this.explainTab()}
-        ${this.traceTab(res)}
-        ${this.hintsTab(res)}
-        ${this.hiddenTab()}
-        ${this.chatTab()}
+      <div class="cq-min-logo"><img src="${LOGO_DATA_URL}" alt="CQ" /></div>
+      <div class="cq-panel-inner">
+        ${this.hdr(res.verified as "oracle-verified" | "unverified" | null)}
+        ${warn}
+        ${this.tabs()}
+        <div class="cq-body">
+          ${this.codeExplainTab(res)}
+          ${this.visualizeTab(res)}
+          ${this.approachTab(res)}
+          ${this.debugTab(res)}
+          ${this.traceTab(res)}
+          ${this.hintsTab(res)}
+          ${this.hiddenTab()}
+          ${this.chatTab()}
+        </div>
       </div>`;
 
     this.attachAll(res);
@@ -1181,14 +1811,62 @@ export class ResultCard {
     // Close
     this.shadow.getElementById("cq-close-btn")?.addEventListener("click", () => this.close());
 
+    // Minimize – stopPropagation so click doesn't bubble to panel restore handler
+    this.shadow.getElementById("cq-minimize-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.minimize();
+    });
+
+    // Clicking the FAB bubble while minimized restores – attach only once
+    if (!this.panelClickAttached) {
+      this.panelClickAttached = true;
+      this.panel.addEventListener("click", () => {
+        if (this.panel.classList.contains("minimized")) this.maximize();
+      });
+    }
+
     // Tabs
     this.shadow.querySelectorAll(".cq-tab").forEach((btn) => {
-      btn.addEventListener("click", () => this.switchTab((btn as HTMLElement).dataset.tab ?? "verdict"));
+      btn.addEventListener("click", () => {
+        const id = (btn as HTMLElement).dataset.tab ?? "verdict";
+        this.activeTab = id;
+        this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.remove("active"));
+        this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        this.shadow.getElementById(`tab-${id}`)?.classList.add("active");
+      });
     });
 
     // 🔊 Listen buttons
     const diagTxt = res.diagnosis?.mistake_class
       ? `Diagnosis: ${mistakeLabel(res.diagnosis.mistake_class)}, ${Math.round(res.diagnosis.confidence * 100)} percent confidence.` : "";
+
+    // Code Explain tab listen
+    this.shadow.getElementById("cq-speak-codeexplain")?.addEventListener("click", () => {
+      const panel = this.shadow.getElementById("tab-codeexplain");
+      if (panel) playText(panel.innerText.replace(/\n+/g, " ").replace(/Listen/g, "").replace(/Copy/g, ""));
+    });
+
+    // Approach tab listen
+    this.shadow.getElementById("cq-speak-approach")?.addEventListener("click", () => {
+      const panel = this.shadow.getElementById("tab-approach");
+      if (panel) playText(panel.innerText.replace(/\n+/g, " ").replace(/Listen|View steps/g, ""));
+    });
+
+    // Visualize tab listen
+    this.shadow.getElementById("cq-speak-visualize")?.addEventListener("click", () => {
+      const panel = this.shadow.getElementById("tab-visualize");
+      if (panel) playText(panel.innerText.replace(/\n+/g, " ").replace(/Listen/g, ""));
+    });
+
+    // Copy code button
+    this.shadow.getElementById("cq-copy-code")?.addEventListener("click", (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      navigator.clipboard.writeText(this.submittedCode || "").then(() => {
+        btn.textContent = "✓ Copied"; setTimeout(() => { btn.textContent = "⧉ Copy"; }, 1800);
+      });
+    });
+
     this.shadow.getElementById("cq-speak-debug")?.addEventListener("click", () =>
       playText([res.explanation, diagTxt].filter(Boolean).join(" "))
     );
@@ -1206,12 +1884,9 @@ export class ResultCard {
       if (txts.length) playText(txts.join(". "));
     });
     this.shadow.getElementById("cq-speak-hidden")?.addEventListener("click", () => {
-      const cases = this.shownCases();
+      const cases = this.hiddenCases(this.slug);
       playText(cases.map((c, i) => `Test ${i + 1}: Input ${c.input}. Expected ${c.expected}.`).join(" "));
     });
-    this.shadow.getElementById("cq-ex-run")?.addEventListener("click", () => { void this.runExplain(); });
-    this.shadow.getElementById("cq-speak-explain")?.addEventListener("click", () => playText(this.explainText));
-    this.shadow.getElementById("cq-ai-debug-btn")?.addEventListener("click", () => { void this.runAiDebug(); });
 
     // Trace nav
     this.shadow.getElementById("cq-trace-prev")?.addEventListener("click", () => {
@@ -1225,7 +1900,6 @@ export class ResultCard {
     const { slug, attemptId } = this;
     for (let lv = 1; lv <= (res.allowed_hint_level ?? 1); lv++) {
       const el = this.shadow.getElementById(`cq-hint-text-${lv}`);
-      if (el && !attemptId) { el.textContent = "Hints need an analysed attempt: run Debug on Python 3 code."; continue; }
       if (!el || !slug || !attemptId) continue;
       const lvCopy = lv;
       chrome.runtime.sendMessage({ type: "GET_HINT", slug, attemptId, level: lvCopy })
@@ -1235,10 +1909,36 @@ export class ResultCard {
         .catch(() => { el.textContent = "Could not load hint."; });
     }
 
-    // Generated tests: copy buttons are wired after each (re)render of the list
-    this.shadow.getElementById("cq-gen-hidden")?.addEventListener("click", () => { this.hiddenList = null; void this.loadHidden(); });
-    if (this.activeTab === "hiddentests") void this.loadHidden();
-    if (this.activeTab === "trace") void this.loadCrewTrace();
+    // Hidden test copy buttons
+    this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const text = (btn as HTMLElement).dataset.copy ?? "";
+        navigator.clipboard.writeText(text).catch(() => {});
+        (btn as HTMLElement).textContent = "✓";
+        setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
+      });
+    });
+
+    // Hidden regenerate
+    const genBtn = this.shadow.getElementById("cq-gen-hidden") as HTMLButtonElement | null;
+    const hiddenResults = this.shadow.getElementById("cq-hidden-results");
+    genBtn?.addEventListener("click", () => {
+      if (!genBtn || !hiddenResults) return;
+      genBtn.disabled = true; genBtn.textContent = "⏳ Generating…";
+      setTimeout(() => {
+        hiddenResults.innerHTML = this.buildTestCards(this.slug);
+        // Re-attach copy buttons
+        this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const text = (btn as HTMLElement).dataset.copy ?? "";
+            navigator.clipboard.writeText(text).catch(() => {});
+            (btn as HTMLElement).textContent = "✓";
+            setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
+          });
+        });
+        genBtn.textContent = "⚡ Regenerate"; genBtn.disabled = false;
+      }, 900);
+    });
 
     // Chat
     this.attachChat(res);
@@ -1276,33 +1976,11 @@ export class ResultCard {
     const msgs = this.shadow.getElementById("cq-chat-messages");
     if (!input || !sendBtn || !msgs) return;
 
-    // Assistant bubbles render Markdown (bold, lists, code, tables…) safely; user bubbles stay plain text.
-    const addBubble = (text: string, isUser: boolean): HTMLElement => {
+    const addBubble = (text: string, isUser: boolean) => {
       const w = document.createElement("div"); w.className = `chat-bubble${isUser ? " user" : ""}`;
       const av = document.createElement("div"); av.className = "chat-av"; av.textContent = isUser ? "U" : "AI";
-      const col = document.createElement("div"); col.className = "chat-col";
-      const b = document.createElement("div"); b.className = isUser ? "chat-text" : "chat-text md";
-      if (isUser) b.textContent = text; else b.appendChild(renderMarkdown(text));
-      col.appendChild(b);
-      if (!isUser) {
-        const tools = document.createElement("div"); tools.className = "chat-tools";
-        const copy = document.createElement("button"); copy.className = "chat-tool"; copy.textContent = "⧉ Copy";
-        copy.addEventListener("click", () => {
-          navigator.clipboard.writeText(b.dataset.raw ?? b.textContent ?? "").catch(() => {});
-          copy.textContent = "✓ Copied"; setTimeout(() => { copy.textContent = "⧉ Copy"; }, 1200);
-        });
-        const speak = document.createElement("button"); speak.className = "chat-tool"; speak.textContent = "🔊 Listen";
-        speak.addEventListener("click", () => playText(stripMarkdown(b.dataset.raw ?? b.textContent ?? "")));
-        tools.append(copy, speak); col.appendChild(tools);
-      }
-      w.appendChild(av); w.appendChild(col); msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
-      return b;
-    };
-    const chips = (target: HTMLElement, items: Array<[string, "good" | "warn" | ""]>) => {
-      if (!items.length) return;
-      const row = document.createElement("div"); row.className = "chat-chips";
-      items.forEach(([t, k]) => { const c = document.createElement("span"); c.className = `chat-chip ${k}`.trim(); c.textContent = t; row.appendChild(c); });
-      target.closest(".chat-col")?.appendChild(row);
+      const b = document.createElement("div"); b.className = "chat-text"; b.textContent = text;
+      w.appendChild(av); w.appendChild(b); msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
     };
 
     const showTyping = () => {
@@ -1312,165 +1990,28 @@ export class ResultCard {
     };
     const hideTyping = () => { this.shadow.getElementById("cq-typing")?.remove(); };
 
-    // ── Backend chat (FEATURE_CHAT) with a local canned fallback when the backend/chat is unavailable ──
-    const addNote = (text: string) => {
-      const n = document.createElement("div");
-      n.style.cssText = "font-size:11px;color:#6b7280;text-align:center;margin:4px 12px;";
-      n.textContent = text; msgs.appendChild(n); msgs.scrollTop = msgs.scrollHeight;
-    };
-    const call = <T>(m: object): Promise<(T & { error?: string }) | null> =>
-      (chrome.runtime.sendMessage(m) as Promise<(T & { error?: string }) | null>).catch(() => null);
-
-    /** Stream one reply through the service worker; resolves when the stream ends. Text is revealed progressively. */
-    const streamReply = (text: string, code?: string) => new Promise<{ ok: boolean; content: string; meta?: Extract<ChatStreamEvent, { event: "meta" }>["data"]; done?: Extract<ChatStreamEvent, { event: "done" }>["data"]; bubble?: HTMLElement }>((resolve) => {
-      let port: chrome.runtime.Port;
-      try { port = chrome.runtime.connect({ name: "cq-chat" }); } catch { resolve({ ok: false, content: "" }); return; }
-      let content = "", shown = 0, ended = false, failed = false, settled = false;
-      let meta: Extract<ChatStreamEvent, { event: "meta" }>["data"] | undefined;
-      let done: Extract<ChatStreamEvent, { event: "done" }>["data"] | undefined;
-      let bubble: HTMLElement | undefined;
-      let timer: ReturnType<typeof setInterval> | undefined;
-      const finish = () => {
-        if (settled) return; settled = true; if (timer) clearInterval(timer);
-        bubble?.classList.remove("cq-caret");
-        if (bubble) { bubble.dataset.raw = content; bubble.replaceChildren(renderMarkdown(content)); }
-        try { port.disconnect(); } catch { /* already closed */ }
-        resolve({ ok: content.length > 0, content, meta, done, bubble });
-      };
-      const step = () => {
-        if (bubble && shown < content.length) {
-          shown = Math.min(content.length, shown + Math.max(4, Math.ceil((content.length - shown) / 10)));
-          bubble.replaceChildren(renderMarkdown(content.slice(0, shown)));
-          msgs.scrollTop = msgs.scrollHeight;
-        }
-        if (ended && shown >= content.length) finish();
-      };
-      port.onMessage.addListener((e: ChatStreamEvent) => {
-        if (e.event === "meta") meta = e.data;
-        else if (e.event === "token") {
-          if (!bubble) { hideTyping(); bubble = addBubble("", false); bubble.classList.add("cq-caret"); }
-          content += e.data.text;
-        } else if (e.event === "done") done = e.data;
-        else if (e.event === "error") failed = true;
-        else if (e.event === "end") ended = true;
-        if (!timer) timer = setInterval(step, 24);
-        if (failed && !content) finish();
-      });
-      port.onDisconnect.addListener(() => { ended = true; if (!content) finish(); });
-      port.postMessage({ slug: this.slug, text, code, codeLanguage: code ? this.reviewLang : undefined });
-    });
-
-    const send = async (text: string, fromUser = true, code?: string) => {
+    const send = (text: string, fromUser = true) => {
       if (fromUser) addBubble(text, true);
       showTyping();
-      let r = await streamReply(text, code);
-      if (!r.ok) {
-        // streaming unavailable: try the plain JSON endpoint once, then the local canned reply
-        const j = await call<ChatSendResponse>({ type: "CHAT_SEND", slug: this.slug, text, code, codeLanguage: code ? this.reviewLang : undefined });
-        hideTyping();
-        if (j && !j.error && j.reply) {
-          const b = addBubble(j.reply.content, false); b.dataset.raw = j.reply.content;
-          r = { ok: true, content: j.reply.content, bubble: b,
-                meta: { thread_id: j.thread_id, language: j.reply.language, mode: j.reply.mode, tools_used: j.reply.tools_used, personalized: j.reply.personalized } };
-        } else {
-          const local = this.chatReply(text);
-          const b = addBubble(local, false); b.dataset.raw = local;
-          addNote("Offline mode: could not reach the CodeQuest chat service.");
-          playText(local);
-          return;
-        }
-      }
-      hideTyping();
-      const m = r.meta;
-      const tags: Array<[string, "good" | "warn" | ""]> = [];
-      if (m?.personalized) tags.push(["🔒 Personalised", "good"]);
-      if (m?.mode === "refusal") tags.push(["Solution withheld", "warn"]);
-      if (m?.mode === "guard_fallback") tags.push(["Filtered for safety", "warn"]);
-      if (m?.mode === "fallback") tags.push(["Basic mode (AI model unavailable)", ""]);
-      if (r.done?.sources?.length) tags.push([`Sources: ${r.done.sources.slice(0, 3).join(", ")}`, ""]);
-      if (r.bubble) chips(r.bubble, tags);
-      playText(stripMarkdown(r.content));
+      setTimeout(() => { hideTyping(); const r = this.chatReply(text); addBubble(r, false); playText(r); }, 700);
     };
 
-    this.chatSend = (t: string) => { void send(t); };
     const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ""; send(t); };
     sendBtn.addEventListener("click", submit);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 
-    // ── Profile consent: asked when the chat opens (until the learner decides) ──
-    const consentCard = async () => {
-      const info = await call<ConsentInfo>({ type: "CHAT_CONSENT_INFO" });
-      if (!info || info.error) { addNote("Profile access is not available right now."); return; }
-      const w = document.createElement("div"); w.className = "chat-bubble";
-      const av = document.createElement("div"); av.className = "chat-av"; av.textContent = "🔒";
-      const b = document.createElement("div"); b.className = "chat-text";
-      const title = document.createElement("div"); title.style.fontWeight = "700"; title.textContent = info.title;
-      const body = document.createElement("div"); body.style.cssText = "margin:4px 0 8px;font-size:12px;"; body.textContent = info.text;
-      const user = document.createElement("input"); user.className = "chat-input"; user.placeholder = "Your public LeetCode username";
-      user.style.cssText = "width:100%;box-sizing:border-box;margin-bottom:6px;";
-      const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
-      const allow = document.createElement("button"); allow.className = "cab"; allow.textContent = "Allow & fetch my profile";
-      const skip = document.createElement("button"); skip.className = "cab"; skip.textContent = "Not now";
-      const state = document.createElement("div"); state.style.cssText = "font-size:11px;margin-top:6px;color:#6b7280;";
-      row.append(allow, skip); b.append(title, body, user, row, state); w.append(av, b);
-      msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
-      skip.addEventListener("click", () => {
-        chrome.storage.local.set({ cqConsentAsked: true });
-        w.remove(); addNote("OK — chat works without personalisation. Use 🔒 Profile access to change this.");
-      });
-      allow.addEventListener("click", async () => {
-        const name = user.value.trim(); if (!name) { state.textContent = "Enter your LeetCode username first."; return; }
-        allow.disabled = skip.disabled = true; state.textContent = "Fetching your public profile… (this can take ~30 s)";
-        const st = await call<ConsentStatus>({ type: "CHAT_GRANT", username: name });
-        allow.disabled = skip.disabled = false;
-        if (!st || st.error) { state.textContent = "Could not save permission: " + (st?.error ?? "backend unreachable"); return; }
-        chrome.storage.local.set({ cqConsentAsked: true });
-        w.remove();
-        if (st.profile_synced) {
-          const solved = st.summary?.solved?.All;
-          addNote(`🔒 Profile loaded for ${st.leetcode_username}${solved != null ? ` — ${solved} solved` : ""}. Answers are now personalised.`);
-        } else addNote("Permission saved, but the profile could not be fetched yet" + (st.sync_error?.message ? ` (${st.sync_error.message})` : "") + ". Chat continues without it.");
-      });
-    };
-    call<ConsentStatus>({ type: "CHAT_STATUS" }).then(async (st) => {
-      if (!st || st.error) return; // chat disabled or backend offline: keep local replies
-      if (st.granted) { addNote(`🔒 Personalised with ${st.leetcode_username}'s public LeetCode profile.`); return; }
-      const asked = (await chrome.storage.local.get("cqConsentAsked")).cqConsentAsked;
-      if (!asked) consentCard();
+    this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", () => {
+      addBubble("Explain this problem to me", true); showTyping();
+      setTimeout(() => {
+        hideTyping();
+        const exEl = this.shadow.getElementById("cq-explanation-text");
+        const text = exEl?.textContent?.trim()?.replace("Loading explanation…", "") || res.explanation
+          || "Focus on the constraints and edge cases. Think about what the function needs to return for special inputs.";
+        addBubble(text, false); playText(text);
+      }, 600);
     });
-    this.shadow.getElementById("cq-cab-profile")?.addEventListener("click", async () => {
-      const st = await call<ConsentStatus>({ type: "CHAT_STATUS" });
-      if (!st || st.error) { addNote("Profile access is not available right now."); return; }
-      if (st.granted) {
-        const r = await call<ConsentStatus>({ type: "CHAT_REVOKE" });
-        chrome.storage.local.set({ cqConsentAsked: true });
-        addNote(r && !r.error ? "Permission withdrawn — your stored LeetCode profile data was deleted." : "Could not withdraw permission right now.");
-      } else consentCard();
-    });
-
-    this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", async () => {
-      addBubble("Explain this problem to me in simple words.", true); showTyping();
-      const r = await crew<CrewExplanation>("explain", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
-      hideTyping();
-      if (!r || !r.llm_used) { await send("Explain this problem to me in simple words.", false); return; } // chat service answers instead
-      const e = r.result;
-      const md = [`**What it asks:** ${e.what_is_asked}`, e.input_meaning && `**Input:** ${e.input_meaning}`, e.output_meaning && `**Output:** ${e.output_meaning}`,
-        e.constraints_and_conditions.length && `**Constraints:**\n${e.constraints_and_conditions.map((c) => `- ${c}`).join("\n")}`,
-        e.examples_walkthrough.length && `**Examples:**\n${e.examples_walkthrough.map((c) => `- ${c}`).join("\n")}`,
-        e.code_relation && `**Your code:** ${e.code_relation}${e.code_solves_problem !== "unclear" ? ` (solves the problem: ${e.code_solves_problem})` : ""}`,
-        e.mismatches.length && `**Mismatches:**\n${e.mismatches.map((c) => `- ${c}`).join("\n")}`].filter(Boolean).join("\n\n");
-      const b = addBubble(md, false); b.dataset.raw = md;
-    });
-
-    const reviewNow = () => {
-      if (!this.reviewCode.trim()) { addNote("No code found in the editor to review."); return; }
-      send(`Review my ${this.reviewLang} code for this problem: what might be wrong, and what should I think about?`, true, this.reviewCode);
-    };
-    // Nothing could be executed (e.g. Java): review the code with the AI right away, once per Debug click.
-    if (this.explanationOnly && this.reviewCode.trim() && !this.reviewSent) { this.reviewSent = true; setTimeout(reviewNow, 400); }
 
     this.shadow.getElementById("cq-cab-debug")?.addEventListener("click", () => {
-      if (this.explanationOnly) { reviewNow(); return; }
       this.activeTab = "verdict";
       this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.remove("active"));
       this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.remove("active"));
@@ -1478,14 +2019,16 @@ export class ResultCard {
       this.shadow.getElementById("tab-verdict")?.classList.add("active");
     });
 
-    this.shadow.getElementById("cq-cab-tests")?.addEventListener("click", async () => {
+    this.shadow.getElementById("cq-cab-tests")?.addEventListener("click", () => {
       addBubble("Generate test cases for this problem", true); showTyping();
-      if (!this.hiddenList) await this.loadHidden();
-      hideTyping();
-      const cases = this.shownCases();
-      const reply = `Here are ${cases.length} test cases (open the Hidden tab for details):\n` +
-        cases.map((c, i) => `${i + 1}. ${c.input} → ${c.expected}${c.status ? ` (${c.status})` : ""}`).join("\n");
-      addBubble(reply, false);
+      setTimeout(() => {
+        hideTyping();
+        const cases = this.hiddenCases(this.slug);
+        const reply = `Here are ${cases.length} test cases:\n` +
+          cases.map((c, i) => `${i + 1}. ${c.input} → ${c.expected}`).join("\n");
+        addBubble(reply, false);
+        playText(`I generated ${cases.length} test cases. Check the Hidden tab for the full formatted list.`);
+      }, 800);
     });
   }
 

@@ -1,109 +1,117 @@
 // ─── Shadow-DOM Toolbar — content script ──────────────────────────────────
-// Shows a floating "🔍 Debug" button on text selection anywhere on the page,
-// including the Monaco code editor.
-//
-// Monaco fix: LeetCode's code editor runs in the page's JS world.
-// Content scripts are isolated — window.monaco is undefined here.
-// We ask the Service Worker to run chrome.scripting.executeScript({ world:"MAIN" })
-// which can access window.monaco directly, bypassing both isolation and CSP.
+// Shows a floating selection toolbar on text/code selection.
+// Matches the reference screenshot: dark pill, amber border glow,
+// logo + "Analyze selection" on left, icon action buttons on right.
 
 import { disabledReason } from "./guards";
 import { LOGO_DATA_URL } from "../assets/logo";
-import { orchestrateDebug } from "./orchestrate";
-import { getResultCard, playText } from "./result_card";
-import type { ConsentInfo, ConsentStatus } from "../api/types";
 
 // ── Phase 2: paste + timing tracking ──────────────────────────────────────────
-/** Running total of pasted characters since page load. Sent in /analyze. */
 export let totalPasteChars = 0;
-/** Page load time — elapsed_ms = Date.now() - pageLoadTime when Debug clicked. */
 export const pageLoadTime = Date.now();
-
-// ── context guard ─────────────────────────────────────────────────────────────
 
 function isContextValid(): boolean {
   try { return !!chrome.runtime?.id; } catch { return false; }
 }
 
-/**
- * After the extension is reloaded/updated, content scripts already injected into open tabs lose their connection
- * ("Extension context invalidated"). Remove the dead UI and show one hint instead of throwing errors.
- */
-let staleNoticeShown = false;
-function onContextInvalidated(): void {
-  document.getElementById("codequest-toolbar-host")?.remove();
-  document.getElementById("codequest-result-host")?.remove();
-  if (staleNoticeShown) return;
-  staleNoticeShown = true;
-  const n = document.createElement("div");
-  n.textContent = "CodeQuest AI was updated — refresh this page to use it again.";
-  n.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:2147483647;background:#14141c;color:#fff;border:2px solid #f5c542;"
-    + "border-radius:10px;padding:10px 14px;font:13px system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.5)";
-  document.documentElement.appendChild(n);
-  setTimeout(() => n.remove(), 8000);
-}
-const isInvalidated = (v: unknown): boolean => /context invalidated|Extension context/i.test(String((v as Error)?.message ?? v));
-window.addEventListener("unhandledrejection", (e) => { if (isInvalidated(e.reason)) { e.preventDefault(); onContextInvalidated(); } });
-window.addEventListener("error", (e) => { if (isInvalidated(e.error ?? e.message)) { e.preventDefault(); onContextInvalidated(); } });
-
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const TOOLBAR_CSS = `
-  :host { all: initial; }
-  #cq-toolbar {
-    position: fixed;
-    display: none;
-    align-items: center;
-    gap: 6px;
-    background: #14141c;
-    border: 2px solid #f5c542;
-    border-radius: 14px;
-    padding: 8px 12px;
-    box-shadow: 0 6px 28px rgba(0,0,0,0.6);
-    pointer-events: all;
-    font-family: 'Inter', system-ui, sans-serif;
-    font-size: 12px;
-    color: #e2e8f0;
-    animation: cq-fade-in 0.12s ease;
-    z-index: 2147483647;
-    max-width: calc(100vw - 16px);
-  }
-  #cq-toolbar.visible { display: flex; }
-  @keyframes cq-fade-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .cq-brand { display: flex; align-items: center; gap: 8px; padding-right: 10px; margin-right: 4px; border-right: 1px solid #2d2d3a; }
-  .cq-brand img { width: 30px; height: 30px; border-radius: 8px; background: #fff; padding: 2px; box-sizing: border-box; }
-  .cq-brand-name { font-weight: 700; font-size: 13px; color: #fff; line-height: 1.15; white-space: nowrap; }
-  .cq-brand-sub { font-size: 11px; color: #94a3b8; white-space: nowrap; }
-  .cq-act {
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
-    background: none; border: none; border-radius: 8px; cursor: pointer;
-    color: #cbd5e1; font: inherit; font-size: 11px; font-weight: 600;
-    padding: 4px 9px; min-width: 52px; transition: background .12s, color .12s;
-  }
-  .cq-act .ic { font-size: 18px; line-height: 1; }
-  .cq-act:hover { background: #26263a; color: #fff; }
-  .cq-act:focus-visible { outline: 2px solid #f5c542; }
-  #cq-auth { display: none; flex-direction: column; gap: 6px; width: 300px; }
-  #cq-toolbar.auth #cq-actions { display: none !important; }
-  #cq-toolbar.auth #cq-auth { display: flex; }
-  #cq-toolbar.auth .cq-brand { border-right: none; }
-  .cq-auth-title { font-weight: 700; font-size: 12px; color: #fff; }
-  .cq-auth-text { font-size: 11px; color: #94a3b8; line-height: 1.4; }
-  #cq-auth input {
-    background: #1f1f2e; border: 1px solid #3a3a52; border-radius: 6px; color: #fff;
-    padding: 6px 8px; font: inherit; font-size: 12px; width: 100%; box-sizing: border-box;
-  }
-  #cq-auth input:focus { outline: 2px solid #f5c542; border-color: transparent; }
-  .cq-auth-row { display: flex; gap: 6px; }
-  .cq-btn { border: none; border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .cq-btn.primary { background: linear-gradient(135deg, #22c55e, #16a34a); color: #fff; }
-  .cq-btn.ghost { background: #26263a; color: #cbd5e1; }
-  .cq-btn[disabled] { opacity: .5; cursor: default; }
-  #cq-status { font-size: 11px; color: #94a3b8; min-height: 14px; }
-  #cq-status.err { color: #f87171; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:host { all: initial; font-family: 'Inter', system-ui, sans-serif; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+#cq-toolbar {
+  position: fixed;
+  display: none;
+  align-items: center;
+  gap: 0;
+  background: #17191f;
+  border: 1.5px solid #c89b3c;
+  border-radius: 14px;
+  padding: 0;
+  box-shadow:
+    0 0 0 3px rgba(200,155,60,0.12),
+    0 8px 32px rgba(0,0,0,0.55),
+    0 2px 8px rgba(0,0,0,0.4);
+  pointer-events: all;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #e2e8f0;
+  animation: cq-pop 0.15s cubic-bezier(0.34,1.56,0.64,1);
+  z-index: 2147483647;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 420px;
+}
+#cq-toolbar.visible { display: flex; }
+
+@keyframes cq-pop {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)  scale(1); }
+}
+
+/* ── Left identity section ──────────────────────────────────────────────── */
+.cq-tb-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 10px 12px;
+  border-right: 1px solid #2a2d38;
+  flex-shrink: 0;
+}
+.cq-tb-logo {
+  width: 32px; height: 32px;
+  background: #22c55e;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.cq-tb-logo img { width: 100%; height: 100%; object-fit: contain; }
+.cq-tb-name  { font-size: 0.78rem; font-weight: 700; color: #f1f5f9; line-height: 1.2; }
+.cq-tb-sub   { font-size: 0.65rem; color: #94a3b8; line-height: 1.2; margin-top: 1px; }
+
+/* ── Action buttons ──────────────────────────────────────────────────────── */
+.cq-tb-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 6px 6px;
+}
+.cq-tb-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  padding: 7px 11px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s;
+  min-width: 52px;
+}
+.cq-tb-btn:hover { background: #22273a; }
+.cq-tb-btn:active { background: #2d3347; transform: scale(0.96); }
+.cq-tb-btn-icon { font-size: 1.05rem; line-height: 1; }
+.cq-tb-btn-label {
+  font-size: 0.62rem; font-weight: 600; color: #94a3b8;
+  line-height: 1; letter-spacing: 0.02em;
+}
+/* Debug button is the primary CTA — highlight it */
+.cq-tb-btn.primary .cq-tb-btn-icon { font-size: 1.1rem; }
+.cq-tb-btn.primary .cq-tb-btn-label { color: #e2e8f0; }
+
+/* Divider between groups */
+.cq-tb-divider {
+  width: 1px; height: 28px;
+  background: #2a2d38;
+  flex-shrink: 0;
+  margin: 0 3px;
+}
 `;
 
 // ── refs ──────────────────────────────────────────────────────────────────────
@@ -132,78 +140,76 @@ function initToolbar(): void {
   toolbarEl.id = "cq-toolbar";
   toolbarEl.setAttribute("role", "toolbar");
   toolbarEl.setAttribute("aria-label", "CodeQuest AI");
-  toolbarEl.addEventListener("mousedown", (e) => e.stopPropagation());
   shadowRoot.appendChild(toolbarEl);
 
-  const brand = document.createElement("div");
-  brand.className = "cq-brand";
-  const logo = document.createElement("img");
-  logo.src = LOGO_DATA_URL; logo.alt = "";
-  const names = document.createElement("div");
-  const nm = document.createElement("div"); nm.className = "cq-brand-name"; nm.textContent = "CodeQuest AI";
-  const sub = document.createElement("div"); sub.className = "cq-brand-sub"; sub.id = "cq-brand-sub"; sub.textContent = "Analyze selection";
-  names.append(nm, sub); brand.append(logo, names);
-  toolbarEl.appendChild(brand);
+  toolbarEl.innerHTML = buildToolbarHTML();
 
-  // Action row: each button opens the matching tab of the sidebar panel.
-  const actions = document.createElement("div");
-  actions.id = "cq-actions"; actions.style.cssText = "display:flex;gap:2px;";
-  for (const a of ACTIONS) {
-    const b = document.createElement("button");
-    b.className = "cq-act"; b.dataset.action = a.id; b.title = a.title;
-    const ic = document.createElement("span"); ic.className = "ic"; ic.textContent = a.icon;
-    const lb = document.createElement("span"); lb.textContent = a.label;
-    b.append(ic, lb);
-    b.addEventListener("click", () => runAction(a.id));
-    actions.appendChild(b);
-  }
-  toolbarEl.appendChild(actions);
+  // Attach listeners to each action button
+  shadowRoot.getElementById("cq-tb-debug")?.addEventListener("mousedown", (e) => e.stopPropagation());
+  shadowRoot.getElementById("cq-tb-debug")?.addEventListener("click", () => onActionClick("debug"));
+  shadowRoot.getElementById("cq-tb-explain")?.addEventListener("click", () => onActionClick("explain"));
+  shadowRoot.getElementById("cq-tb-hint")?.addEventListener("click", () => onActionClick("hint"));
+  shadowRoot.getElementById("cq-tb-concept")?.addEventListener("click", () => onActionClick("concept"));
+  shadowRoot.getElementById("cq-tb-listen")?.addEventListener("click", () => onActionClick("listen"));
+  shadowRoot.getElementById("cq-tb-chat")?.addEventListener("click", () => onActionClick("chat"));
 
-  // Authorization step (shown instead of the actions until the learner decides).
-  const auth = document.createElement("div");
-  auth.id = "cq-auth";
-  const aTitle = document.createElement("div"); aTitle.className = "cq-auth-title"; aTitle.id = "cq-auth-title";
-  const aText = document.createElement("div"); aText.className = "cq-auth-text"; aText.id = "cq-auth-text";
-  const aUser = document.createElement("input"); aUser.id = "cq-auth-user"; aUser.placeholder = "Your public LeetCode username";
-  aUser.autocomplete = "off"; aUser.spellcheck = false;
-  const aRow = document.createElement("div"); aRow.className = "cq-auth-row";
-  const aAllow = document.createElement("button"); aAllow.className = "cq-btn primary"; aAllow.id = "cq-auth-allow"; aAllow.textContent = "Allow & continue";
-  const aSkip = document.createElement("button"); aSkip.className = "cq-btn ghost"; aSkip.id = "cq-auth-skip"; aSkip.textContent = "Not now";
-  aRow.append(aAllow, aSkip);
-  const statusEl = document.createElement("div"); statusEl.id = "cq-status";
-  auth.append(aTitle, aText, aUser, aRow, statusEl);
-  toolbarEl.appendChild(auth);
-  aAllow.addEventListener("click", () => { void submitAuth(); });
-  aSkip.addEventListener("click", skipAuth);
-  aUser.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") void submitAuth(); });
-  aUser.addEventListener("keyup", (e) => e.stopPropagation());
-
-  // ── 1. Native selection (problem description, constraints, examples) ──────
+  // ── 1. Native selection
   document.addEventListener("mouseup", handleMouseUp);
 
-  // ── 2. Monaco selection (code editor) ────────────────────────────────────
+  // ── 2. Monaco editor selection
   watchForMonacoEditor();
 
-  // ── 3. Hide on outside click ──────────────────────────────────────────────
+  // ── 3. Hide on outside click
   document.addEventListener("mousedown", (e) => {
     if (!e.composedPath().includes(hostEl!)) hideToolbar();
   });
 
-  // ── 4. Paste detection (Phase 2) ─────────────────────────────────────────
-  //    LeetCode's editor fires paste on the hidden textarea inside Monaco.
+  // ── 4. Paste detection (Phase 2)
   document.addEventListener("paste", (e) => {
     const pasted = e.clipboardData?.getData("text") ?? "";
     totalPasteChars += pasted.length;
   }, true);
 
-  // ── 5. Context menu messages from SW ──────────────────────────────────────
+  // ── 5. Context menu messages from SW
   chrome.runtime.onMessage.addListener((msg: { type: string }) => {
     if (msg.type === "CONTEXT_MENU_DEBUG" || msg.type === "CONTEXT_MENU_DEBUG_ALL") {
-      runAction("debug");
+      onActionClick("debug");
     }
   });
 
   console.info("[CQ] Toolbar ready.");
+}
+
+function buildToolbarHTML(): string {
+  const actions = [
+    { id: "cq-tb-debug",   icon: "🐛",  label: "Debug",   primary: true },
+    { id: "cq-tb-explain", icon: "📄",  label: "Explain", primary: false },
+    { id: "cq-tb-hint",    icon: "💡",  label: "Hint",    primary: false },
+    { id: "cq-tb-concept", icon: "🎓",  label: "Concept", primary: false },
+    { id: "cq-tb-listen",  icon: "🔊",  label: "Listen",  primary: false },
+    { id: "cq-tb-chat",    icon: "💬",  label: "Chat",    primary: false },
+  ];
+
+  const btnHtml = actions.map((a) =>
+    `<button class="cq-tb-btn${a.primary ? " primary" : ""}" id="${a.id}" title="${a.label}">
+       <span class="cq-tb-btn-icon">${a.icon}</span>
+       <span class="cq-tb-btn-label">${a.label}</span>
+     </button>`
+  ).join("");
+
+  return `
+    <div class="cq-tb-identity">
+      <div class="cq-tb-logo">
+        <img src="${LOGO_DATA_URL}" alt="CQ" />
+      </div>
+      <div>
+        <div class="cq-tb-name">CodeQuest AI</div>
+        <div class="cq-tb-sub">Analyze selection</div>
+      </div>
+    </div>
+    <div class="cq-tb-actions">
+      ${btnHtml}
+    </div>`;
 }
 
 // ── Monaco editor watcher ─────────────────────────────────────────────────────
@@ -212,18 +218,13 @@ function watchForMonacoEditor(): void {
   const attach = (el: HTMLElement) => {
     if ((el as HTMLElement & { _cqDone?: boolean })._cqDone) return;
     (el as HTMLElement & { _cqDone?: boolean })._cqDone = true;
-
     el.addEventListener("mouseup", () => {
-      // Give Monaco ~100ms to finalise its internal selection state
       setTimeout(askSwForMonacoSelection, 100);
     });
-    console.info("[CQ] Attached mouseup to Monaco editor container.");
   };
-
   const scan = () =>
     document.querySelectorAll<HTMLElement>(".monaco-editor").forEach(attach);
-
-  scan(); // immediate
+  scan();
   const obs = new MutationObserver(scan);
   obs.observe(document.body, { childList: true, subtree: true });
 }
@@ -235,31 +236,24 @@ async function askSwForMonacoSelection(): Promise<void> {
       text: string;
       top: number; bottom: number; left: number; right: number;
     } | null;
-
     if (result?.text && result.text.length >= 1) {
       lastSelectedText = result.text;
-      // Build a DOMRect from the returned values for toolbar positioning
       const rect = new DOMRect(
-        result.left,
-        result.top,
+        result.left, result.top,
         result.right - result.left,
         result.bottom - result.top
       );
       showToolbarAt(rect);
     }
-  } catch {
-    // SW not available — ignore silently
-  }
+  } catch { /* SW not available */ }
 }
 
 // ── native mouse-up handler ───────────────────────────────────────────────────
 
-function handleMouseUp(e: MouseEvent): void {
-  if (hostEl && e.composedPath().includes(hostEl)) return; // clicks inside the toolbar must not re-trigger it
+function handleMouseUp(): void {
   setTimeout(() => {
     const sel = window.getSelection();
     const text = sel?.toString().trim() ?? "";
-
     if (text.length >= 2 && sel && sel.rangeCount > 0) {
       const rect = sel.getRangeAt(0).getBoundingClientRect();
       if (rect.width > 0 || rect.height > 0) {
@@ -268,8 +262,6 @@ function handleMouseUp(e: MouseEvent): void {
         return;
       }
     }
-    // If no native selection and Monaco didn't fire, hide
-    // (Monaco fires its own listener above — don't hide here)
   }, 30);
 }
 
@@ -277,160 +269,66 @@ function handleMouseUp(e: MouseEvent): void {
 
 function showToolbarAt(rect: DOMRect): void {
   if (!toolbarEl) return;
-  lastRect = rect;
-  void prepareAuth().then(() => positionToolbar());
-}
-
-function positionToolbar(): void {
-  if (!toolbarEl || !lastRect) return;
-  const M = 8;
-  toolbarEl.classList.add("visible"); // visible first so its real size can be measured
-  const TH = toolbarEl.offsetHeight || 64, TW = toolbarEl.offsetWidth || 440;
-  let top = lastRect.top - TH - M;
-  if (top < M) top = lastRect.bottom + M;
-  top = Math.max(M, Math.min(top, window.innerHeight - TH - M));
-  let left = lastRect.left + lastRect.width / 2 - TW / 2;
+  const TH = 56, TW = 440, M = 10;
+  let top = rect.top - TH - M;
+  if (top < M) top = rect.bottom + M;
+  let left = rect.left + rect.width / 2 - TW / 2;
   left = Math.max(M, Math.min(left, window.innerWidth - TW - M));
   toolbarEl.style.top = `${top}px`;
   toolbarEl.style.left = `${left}px`;
+  toolbarEl.classList.add("visible");
 }
 
 function hideToolbar(): void {
   toolbarEl?.classList.remove("visible");
 }
 
-// ── authorization (profile consent) at selection time ─────────────────────────
+// ── action click handler ──────────────────────────────────────────────────────
 
-type AuthState = "unknown" | "ok" | "needed";
-let authState: AuthState = "unknown";
-let lastRect: DOMRect | null = null;
-let consentInfo: ConsentInfo | null = null;
+import { orchestrateDebug } from "./orchestrate";
+import { getResultCard } from "./result_card";
 
-function call<T>(m: object): Promise<(T & { error?: string }) | null> {
-  try {
-    return (chrome.runtime.sendMessage(m) as Promise<(T & { error?: string }) | null>).catch(() => null);
-  } catch { return Promise.resolve(null); }
-}
-
-function setStatus(text: string, isErr = false): void {
-  const el = shadowRoot?.getElementById("cq-status");
-  if (!el) return;
-  el.textContent = text;
-  el.className = isErr ? "err" : "";
-}
-
-function showAuthView(on: boolean): void {
-  toolbarEl?.classList.toggle("auth", on);
-  const sub = shadowRoot?.getElementById("cq-brand-sub");
-  if (sub) sub.textContent = on ? "Authorize to continue" : "Analyze selection";
-}
-
-/** Decide whether to show the actions or the authorization step. Backend offline / chat disabled → just show actions. */
-async function prepareAuth(): Promise<void> {
-  if (!isContextValid()) return;
-  if (authState === "unknown") {
-    const st = await call<ConsentStatus>({ type: "CHAT_STATUS" });
-    if (!st || st.error || st.granted) authState = "ok";
-    else {
-      const asked = (await chrome.storage.local.get("cqConsentAsked")).cqConsentAsked;
-      authState = asked ? "ok" : "needed";
-    }
-  }
-  if (authState === "needed") {
-    if (!consentInfo) {
-      const info = await call<ConsentInfo>({ type: "CHAT_CONSENT_INFO" });
-      if (!info || info.error) authState = "ok"; else consentInfo = info;
-    }
-    if (consentInfo) {
-      const t = shadowRoot?.getElementById("cq-auth-title"), x = shadowRoot?.getElementById("cq-auth-text");
-      if (t) t.textContent = consentInfo.title;
-      if (x) x.textContent = consentInfo.text;
-    }
-  }
-  showAuthView(authState === "needed");
-}
-
-async function submitAuth(): Promise<void> {
-  const input = shadowRoot?.getElementById("cq-auth-user") as HTMLInputElement | null;
-  const allow = shadowRoot?.getElementById("cq-auth-allow") as HTMLButtonElement | null;
-  const skip = shadowRoot?.getElementById("cq-auth-skip") as HTMLButtonElement | null;
-  const name = input?.value.trim() ?? "";
-  if (!name) { setStatus("Enter your LeetCode username first.", true); return; }
-  if (allow) allow.disabled = true;
-  if (skip) skip.disabled = true;
-  setStatus("Fetching your public profile… (this can take ~30 s)");
-  const st = await call<ConsentStatus>({ type: "CHAT_GRANT", username: name });
-  if (allow) allow.disabled = false;
-  if (skip) skip.disabled = false;
-  if (!st || st.error) { setStatus("Could not save permission: " + (st?.error ?? "backend unreachable"), true); return; }
-  try { await chrome.storage.local.set({ cqConsentAsked: true }); } catch { /* ignore */ }
-  authState = "ok";
-  setStatus("");
-  showAuthView(false);
-  positionToolbar();
-}
-
-function skipAuth(): void {
-  try { void chrome.storage.local.set({ cqConsentAsked: true }); } catch { /* ignore */ }
-  authState = "ok";
-  setStatus("");
-  showAuthView(false);
-  positionToolbar();
-}
-
-// ── actions: each opens the matching tab of the sidebar ───────────────────────
-
-type ActionId = "debug" | "explain" | "hint" | "concept" | "listen" | "chat";
-const ACTIONS: Array<{ id: ActionId; icon: string; label: string; title: string }> = [
-  { id: "debug",   icon: "🪲", label: "Debug",   title: "Run your code and diagnose it (Debug tab)" },
-  { id: "explain", icon: "📄", label: "Explain", title: "Explain the problem (and your selection) from its link (Explain tab)" },
-  { id: "hint",    icon: "💡", label: "Hint",    title: "Tiered hints, no full solution (Hints tab)" },
-  { id: "concept", icon: "🎓", label: "Concept", title: "The idea or pattern behind the selection (Chat tab)" },
-  { id: "listen",  icon: "🔊", label: "Listen",  title: "Read the selection aloud" },
-  { id: "chat",    icon: "💬", label: "Chat",    title: "Ask about the selection (Chat tab)" },
-];
-
-function currentSlug(): string {
-  return location.pathname.match(/\/problems\/([^/?#]+)/)?.[1] ?? "unknown";
-}
-
-function runAction(id: ActionId): void {
+function onActionClick(action: string): void {
   if (!isContextValid()) {
     document.getElementById("codequest-toolbar-host")?.remove();
     return;
   }
-  const selected = window.getSelection()?.toString().trim() || lastSelectedText;
-  const snippet = selected.length > 1500 ? selected.slice(0, 1500) + "…" : selected;
+
+  const selectedText = window.getSelection()?.toString().trim() || lastSelectedText;
   const card = getResultCard();
   hideToolbar();
 
-  switch (id) {
-    case "debug": return runAnalysis(selected, "verdict");
-    case "hint":  return runAnalysis(selected, "hints");
-    case "listen":
-      playText(selected);
-      return;
-    case "explain":
-      return card.openExplain(snippet || undefined);
-    case "concept":
-      return card.openChat(currentSlug(), snippet
-        ? `What concept or pattern is behind this part? Explain the idea without giving the full solution:\n"${snippet}"`
-        : "What concept or pattern is behind this problem? Explain the idea without giving the full solution.", true);
-    case "chat":
-      return card.openChat(currentSlug(), snippet ? `About this: "${snippet}"\n` : undefined, false);
+  if (action === "chat") {
+    // Open panel on Chat tab
+    card.showResults(
+      { results: [], flags: [], verified: null, attempt_id: 0 } as never,
+      window.location.pathname.split("/problems/")[1]?.split("/")[0] ?? "problem"
+    );
+    return;
   }
-}
 
-/** Capture + analyze, then open the panel on the requested tab. */
-function runAnalysis(selectedText: string, tab: "verdict" | "hints"): void {
-  const card = getResultCard();
-  card.showLoading("Capturing problem + analyzing code…");
+  if (action === "listen") {
+    const text = selectedText || document.title;
+    chrome.runtime.sendMessage({ type: "PLAY_TTS", text, lang: "en" }).catch(() => {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.rate = 0.92; speechSynthesis.speak(u);
+    });
+    return;
+  }
+
+  // Debug / Explain / Hint / Concept all trigger analysis + open the panel
+  card.showLoading(
+    action === "hint"    ? "Fetching hint…" :
+    action === "explain" ? "Generating explanation…" :
+    action === "concept" ? "Analyzing concept…" :
+    "Capturing problem + analyzing code…"
+  );
+
   orchestrateDebug(selectedText || undefined)
     .then((outcome) => {
       if (outcome.ok) {
         const lang = outcome.data.problem.lang_selected;
-        card.setReviewCode(outcome.data.code, lang);
-        card.showResults(outcome.data.analysis, outcome.data.problem.slug, lang, outcome.data.explanationOnly, outcome.data.explanationOnly ? undefined : tab);
+        card.showResults(outcome.data.analysis, outcome.data.problem.slug, lang);
       } else {
         card.showError(outcome.error.message, outcome.error.detail);
       }
