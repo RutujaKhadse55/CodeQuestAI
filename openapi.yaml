@@ -57,6 +57,7 @@ components:
         expected: {type: string, nullable: true}
         actual: {type: string, nullable: true}
         failure_class: {type: string, nullable: true}
+        error: {type: string, nullable: true, description: "additive (Phase 1): runtime error / timeout text"}
     Divergence:
       type: object
       properties:
@@ -120,7 +121,7 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LCProblem"}}}}
       responses:
         "200":
-          description: ok
+          description: "supported=false => explanation-only; reason is UNSUPPORTED_LANGUAGE or 'UNSUPPORTED_TYPE: ...'"
           content: {application/json: {example: {problem_id: two-sum, supported: true, reason: null}}}
   /analyze:
     post:
@@ -146,6 +147,11 @@ paths:
                 explanation: Your loop skips the case where the list has a single element.
                 flags: []
         "400": {description: CODE_REJECTED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /admin/attacks:
+    get:
+      summary: Run the sandbox attack set (evidence); every entry must be blocked
+      responses:
+        "200": {description: ok, content: {application/json: {example: {total: 8, blocked: 8, results: [{name: file_read, blocked: true, by: policy, detail: banned_builtin}]}}}}
   /hint:
     post:
       summary: Next allowed hint (AI-owned; level enforced by Backend HintState)

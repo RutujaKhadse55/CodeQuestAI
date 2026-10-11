@@ -48,6 +48,7 @@ class TestResult(BaseModel):
     expected: str | None = None
     actual: str | None = None  # fuzz => None (never shown)
     failure_class: str | None = None
+    error: str | None = None  # additive (Phase 1): runtime error / timeout text for example runs
 
 
 class Divergence(BaseModel):
