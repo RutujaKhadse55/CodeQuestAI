@@ -95,7 +95,8 @@ components:
         results: {type: array, items: {$ref: "#/components/schemas/TestResult"}}
         diagnosis: {allOf: [{$ref: "#/components/schemas/Diagnosis"}], nullable: true}
         explanation: {type: string, nullable: true}
-        flags: {type: array, items: {type: string}}
+        flags: {type: array, items: {type: string}, description: "e.g. copy_suspected, no_reference_bundle, fuzz_budget_hit"}
+        allowed_hint_level: {type: integer, nullable: true, description: "additive (Phase 2): highest unlocked hint tier"}
     HintResult:
       type: object
       required: [level, text]
@@ -165,6 +166,20 @@ paths:
               schema: {$ref: "#/components/schemas/HintResult"}
               example: {level: 1, text: "Think about what you need to remember while scanning the list.", locked: false, guard: {passed: true, retries: 0, source: template}}
         "423": {description: HINT_LOCKED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /hint-state/{user_id}/{problem_slug}:
+    get:
+      summary: Which hint tier is unlocked (attempts / elapsed time; copy-flagged attempts excluded)
+      parameters:
+        - {name: user_id, in: path, required: true, schema: {type: string}}
+        - {name: problem_slug, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: ok, content: {application/json: {example: {allowed_level: 2, max_level_given: 1, attempts_counted: 2, elapsed_s: 95, next_requirement: "Unlocks after 3 attempts or 6 minutes on this problem"}}}}
+  /attempts/{user_id}:
+    get:
+      summary: Recent attempts (no code, no fuzz seed)
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: ok, content: {application/json: {example: [{attempt_id: 7, problem_slug: binary-search, passed_all: false, verified: oracle-verified, copy_flagged: false, created_at: "2026-10-11T08:12:57+00:00"}]}}}
   /dashboard/{user_id}:
     get:
       summary: Mastery, mistakes, recent diagnoses

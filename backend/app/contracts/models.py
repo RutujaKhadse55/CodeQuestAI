@@ -127,3 +127,4 @@ class AnalyzeResponse(BaseModel):
     diagnosis: Diagnosis | None = None
     explanation: str | None = None
     flags: list[str] = []
+    allowed_hint_level: int | None = None  # additive (Phase 2): highest hint tier unlocked right now

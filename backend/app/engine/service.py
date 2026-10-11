@@ -1,10 +1,32 @@
 """Engine Protocol implementation (Backend). Phase 1: sandbox_run. fuzz/trace arrive in Phase 2."""
+from dataclasses import dataclass, field
 from typing import Any
 
-from ..contracts.models import ReferenceBundle, TestResult
+from ..contracts.models import Divergence, ReferenceBundle, TestResult
 from .examples_parser import ParseError, parse_value
 from .sandbox import runner
 from .signature import parse_signature
+
+
+@dataclass
+class FuzzResult:
+    """Summary of a differential fuzz run. Never contains an input value (hidden-test secrecy)."""
+    seed: int
+    run: int = 0
+    failures: int = 0
+    first_kind: str | None = None          # wrong_output | runtime_error | timeout
+    failure_class: str | None = None       # bucket of the SHRUNK failing input
+    divergence: Divergence | None = None
+    vector: str = ""                       # fixed-seed 0/1 pass-fail vector (mutation fingerprints)
+    flags: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        return self.run > 0 and self.failures == 0
+
+    @property
+    def ran(self) -> bool:
+        return self.run > 0
 
 
 def _canon(v: Any) -> Any:
@@ -25,6 +47,11 @@ def values_equal(actual: Any, expected: Any, comparator: str = "exact") -> bool:
     if comparator == "float_tol" and isinstance(a, float) and isinstance(e, (int, float)):
         return abs(a - e) <= 1e-5
     return a == e
+
+
+FINGERPRINT_SEED = 20261011  # fixed: every fingerprint is computed on the same input set
+FINGERPRINT_N = 64
+FUZZ_BUDGET_S = 15.0
 
 
 class SandboxEngine:
@@ -64,11 +91,41 @@ class SandboxEngine:
                                           actual=_show(actual), **base))
         return results
 
-    def fuzz(self, learner_code: str, bundle: ReferenceBundle, seed: int, n: int = 200):
-        raise NotImplementedError("Phase 2")
+    def fuzz(self, learner_code: str, bundle: ReferenceBundle, seed: int, n: int = 200) -> FuzzResult:
+        """Differential fuzz vs the oracle (fresh `seed` per attempt, stored, never shown) + shrink + trace."""
+        res = FuzzResult(seed=seed)
+        sig = parse_signature(learner_code)
+        if sig.entry is None:
+            res.flags.append("no_entry_point")
+            return res
+        payload = {"mode": "verify", "code": learner_code, "entry": sig.entry, "oracle_code": bundle.oracle_code,
+                   "reference_code": bundle.reference_code, "gen_code": bundle.gen_inputs_code,
+                   "comparator": bundle.comparator, "seed": seed, "fp_seed": FINGERPRINT_SEED, "n": n,
+                   "fp_n": FINGERPRINT_N, "budget_s": FUZZ_BUDGET_S}
+        lines = runner.run(payload, FUZZ_BUDGET_S + 30)
+        err = next((ln["load_error"] for ln in lines if "load_error" in ln), None)
+        v = next((ln["verify"] for ln in lines if "verify" in ln), None)
+        if err or v is None:
+            res.flags.append("fuzz_unavailable")
+            if err:
+                res.flags.append(f"fuzz_error: {err[:120]}")
+            return res
+        res.run, res.failures = v["run"], v["failures"]
+        res.first_kind, res.failure_class, res.vector = v["first_kind"], v["failure_class"], v["vector"]
+        if v.get("divergence"):
+            res.divergence = Divergence(**v["divergence"])
+        if v["run"] == 0:
+            res.flags.append("generator_produced_no_valid_inputs")
+        if v.get("budget_hit"):
+            res.flags.append("fuzz_budget_hit")
+        return res
 
-    def trace(self, reference_code: str, learner_code: str, args: Any):
-        raise NotImplementedError("Phase 2")
+    def trace(self, reference_code: str, learner_code: str, args: Any) -> Divergence | None:
+        sig = parse_signature(learner_code)
+        lines = runner.run({"mode": "trace", "code": learner_code, "reference_code": reference_code,
+                            "entry": sig.entry, "args": args}, 15)
+        d = next((ln["trace"] for ln in lines if "trace" in ln), None)
+        return Divergence(**d) if d else None
 
 
 def _show(v: Any) -> str:

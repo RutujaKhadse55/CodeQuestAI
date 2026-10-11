@@ -62,13 +62,15 @@ def test_analyze_error_paths(real_client):
 def test_analyze_good_and_bad_solution(real_client):
     real_client.post("/problems/capture", headers=H, json=_fixture("two-sum"))
     ok = _analyze(real_client, GOOD_TWO_SUM).json()
-    assert [r["outcome"] for r in ok["results"]] == ["passed"] * 3 and ok["verified"] == "unverified"
+    assert [r["outcome"] for r in ok["results"]] == ["passed"] * 4 and ok["verified"] == "oracle-verified"
+    assert ok["results"][-1]["kind"] == "fuzz" and ok["results"][-1]["input"] is None
     bad = _analyze(real_client, BAD_TWO_SUM, run_capture={"verdict": "Wrong Answer", "input": "nums = [1,5,9]\ntarget = 14",
                                                            "expected": "[1,2]", "output": "[0,0]"}).json()
     outcomes = {r["kind"]: r["outcome"] for r in bad["results"]}
     assert outcomes["run_capture"] == "wrong_output" and "wrong_output" in [r["outcome"] for r in bad["results"]]
     # hidden-test secrecy: nothing fuzz-shaped can appear in v0 responses
-    assert all(r["kind"] != "fuzz" for r in bad["results"])
+    assert all(r["input"] is None and r["expected"] is None and r["actual"] is None
+               for r in bad["results"] if r["kind"] == "fuzz")
 
 
 @needs_sandbox
@@ -94,10 +96,13 @@ def test_no_hidden_or_fuzz_data_in_any_response(real_client):
     real_client.post("/problems/capture", headers=H, json=_fixture("two-sum"))
     for code in (GOOD_TWO_SUM, BAD_TWO_SUM):
         body = _analyze(real_client, code).json()
-        assert {r["kind"] for r in body["results"]} <= {"example", "run_capture"}
-        assert "fuzz" not in json.dumps(body).lower()
+        for r in body["results"]:
+            if r["kind"] == "fuzz":
+                assert r["input"] is None and r["expected"] is None and r["actual"] is None
+        assert "seed" not in json.dumps(body).lower()
     from sqlmodel import Session, select
     from app import db
     from app.db.models_core import TestResultRow
     with Session(db.engine) as s:
-        assert not s.exec(select(TestResultRow).where(TestResultRow.kind == "fuzz")).all()
+        for row in s.exec(select(TestResultRow).where(TestResultRow.kind == "fuzz")).all():
+            assert row.input is None and row.expected is None and row.actual is None

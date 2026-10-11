@@ -11,10 +11,17 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from .. import harness as _harness_module  # only to locate the file; never imported for execution
 from ... import config
 
-HARNESS_PATH = Path(_harness_module.__file__).resolve()
+_ENGINE = Path(__file__).resolve().parents[1]
+# One standalone source: shrinker + tracer + harness (the harness uses their names directly).
+SOURCE_FILES = [_ENGINE / "shrinker.py", _ENGINE / "tracer" / "tracer.py", _ENGINE / "harness.py"]
+
+
+def build_source() -> str:
+    return (chr(10) * 2).join(f.read_text(encoding="utf-8") for f in SOURCE_FILES)
+
+
 IMAGE = os.getenv("SANDBOX_IMAGE", "python:3.11-slim")
 STARTUP_SLACK_S = 12.0  # container start / image latency
 MAX_STDOUT_BYTES = 1_000_000
@@ -61,7 +68,7 @@ def _docker(payload: dict, total: float) -> str:
            "--memory", "256m", "--memory-swap", "256m", "--cpus", "1", "--pids-limit", "64",
            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
            "--user", "65534:65534", "--tmpfs", "/tmp:rw,noexec,size=16m",
-           IMAGE, "python", "-I", "-c", HARNESS_PATH.read_text(encoding="utf-8")]
+           IMAGE, "python", "-I", "-c", build_source()]
     try:
         r = subprocess.run(cmd, input=json.dumps(payload), capture_output=True, text=True,
                            timeout=total + STARTUP_SLACK_S)
@@ -91,7 +98,9 @@ def _native(payload: dict, total: float) -> str:
         resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
 
     with tempfile.TemporaryDirectory() as cwd:
-        p = subprocess.Popen([sys.executable, "-I", str(HARNESS_PATH)], stdin=subprocess.PIPE,
+        script = Path(cwd) / "sandbox_main.py"
+        script.write_text(build_source(), encoding="utf-8")
+        p = subprocess.Popen([sys.executable, "-I", str(script)], stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={}, cwd=cwd,
                              preexec_fn=limits)
         try:

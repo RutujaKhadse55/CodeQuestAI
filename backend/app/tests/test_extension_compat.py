@@ -34,4 +34,4 @@ def test_extension_analyze_shape_end_to_end(real_client):
     req = {"slug": "two-sum", "source": "leetcode", "code": GOOD_TWO_SUM, "lang": "Python3",
            "paste_chars": 0, "elapsed_ms": 1500, "lang_pref": "hi"}
     body = real_client.post("/analyze", headers=BEARER, json=req).json()
-    assert [r["outcome"] for r in body["results"]] == ["passed"] * 3
+    assert [r["outcome"] for r in body["results"]] == ["passed"] * 4

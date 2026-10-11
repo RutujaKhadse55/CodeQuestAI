@@ -48,6 +48,9 @@ class Attempt(SQLModel, table=True):
     passed_all: bool = False
     paste_chars: int = 0
     elapsed_ms: int = 0
+    fuzz_seed: int | None = None  # stored for reproducibility; never returned by any endpoint
+    copy_flagged: bool = False
+    mastery_pending: bool = False  # deferred until explain-back passes (Mastery.release_pending)
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -72,6 +75,7 @@ class DiagnosisRow(SQLModel, table=True):
     confidence: float = 0.0
     failure_class: str | None = None
     divergence_json: str | None = None
+    fuzz_vector: str | None = None  # 0/1 pass-fail bits on the fixed fingerprint set (no inputs)
 
 
 class HintState(SQLModel, table=True):
