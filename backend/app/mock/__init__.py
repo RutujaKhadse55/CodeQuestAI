@@ -5,7 +5,8 @@ Shapes follow contracts/models.py and the examples in openapi.yaml. Never contai
 from fastapi import APIRouter, Response
 
 from ..contracts.models import (AnalyzeResponse, CaptureResponse, Diagnosis,
-                                Divergence, GuardResult, HintResult, TestResult)
+                                Divergence, GuardResult, HintResult, LCProblem,
+                                TestResult)
 
 router = APIRouter(tags=["mock"])
 
@@ -31,8 +32,11 @@ def users():
 
 
 @router.post("/problems/capture", response_model=CaptureResponse)
-def capture():
-    return CaptureResponse(problem_id="two-sum", supported=True)
+def capture(problem: LCProblem):
+    # Mirrors the plan: only python3 is executed; other languages = explanation-only.
+    if problem.lang_selected != "python3":
+        return CaptureResponse(problem_id=problem.slug, supported=False, reason="UNSUPPORTED_LANGUAGE")
+    return CaptureResponse(problem_id=problem.slug, supported=True)
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)

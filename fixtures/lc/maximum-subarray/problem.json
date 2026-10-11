@@ -1,0 +1,35 @@
+{
+  "slug": "maximum-subarray",
+  "source": "leetcode",
+  "title": "Maximum Subarray",
+  "difficulty": "Medium",
+  "tags": ["Array", "Divide and Conquer", "Dynamic Programming"],
+  "statement_text": "Given an integer array nums, find the subarray with the largest sum, and return its sum.",
+  "examples": [
+    {
+      "input_text": "nums = [-2,1,-3,4,-1,2,1,-5,4]",
+      "output_text": "6"
+    },
+    {
+      "input_text": "nums = [1]",
+      "output_text": "1"
+    },
+    {
+      "input_text": "nums = [5,4,-1,7,8]",
+      "output_text": "23"
+    }
+  ],
+  "constraints_text": "1 <= nums.length <= 10^5; -10^4 <= nums[i] <= 10^4",
+  "starter_python": "class Solution:\n    def maxSubArray(self, nums: List[int]) -> int:\n        ",
+  "lang_selected": "python3",
+  "captured_at": "2026-10-11T07:00:00.000Z",
+  "content_hash": "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  "run_capture": {
+    "verdict": "Wrong Answer",
+    "input": "nums = [-2,1,-3,4,-1,2,1,-5,4]",
+    "output": "0",
+    "expected": "6",
+    "stdout": "",
+    "error": ""
+  }
+}

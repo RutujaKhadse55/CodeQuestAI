@@ -1,0 +1,31 @@
+{
+  "slug": "binary-search",
+  "source": "leetcode",
+  "title": "Binary Search",
+  "difficulty": "Easy",
+  "tags": ["Array", "Binary Search"],
+  "statement_text": "Given an array of integers nums which is sorted in ascending order, and an integer target, write a function to search target in nums. If target exists, then return its index. Otherwise, return -1. You must write an algorithm with O(log n) runtime complexity.",
+  "examples": [
+    {
+      "input_text": "nums = [-1,0,3,5,9,12], target = 9",
+      "output_text": "4"
+    },
+    {
+      "input_text": "nums = [-1,0,3,5,9,12], target = 2",
+      "output_text": "-1"
+    }
+  ],
+  "constraints_text": "1 <= nums.length <= 10^4; -10^4 < nums[i], target < 10^4; All the integers in nums are unique. nums is sorted in ascending order.",
+  "starter_python": "class Solution:\n    def search(self, nums: List[int], target: int) -> int:\n        ",
+  "lang_selected": "python3",
+  "captured_at": "2026-10-11T07:00:00.000Z",
+  "content_hash": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+  "run_capture": {
+    "verdict": "Wrong Answer",
+    "input": "nums = [-1,0,3,5,9,12]\ntarget = 9",
+    "output": "3",
+    "expected": "4",
+    "stdout": "",
+    "error": ""
+  }
+}

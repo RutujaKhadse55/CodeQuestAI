@@ -1,1 +1,36 @@
-{}
+{
+  "toolbar": {
+    "debug": "🔍 डीबग करें",
+    "analyzing": "विश्लेषण हो रहा है…",
+    "backend_ok": "बैकएंड ✅",
+    "backend_offline": "बैकएंड ऑफलाइन — सेटिंग्स जांचें",
+    "select_code_first": "पहले अपना कोड चुनें!"
+  },
+  "options": {
+    "title": "CodeQuest AI — सेटिंग्स",
+    "backend_url": "बैकएंड URL",
+    "token": "API टोकन",
+    "language": "मेंटर भाषा",
+    "save": "सेव करें",
+    "saved": "सेव हो गया ✓"
+  },
+  "panel": {
+    "verdict": "परिणाम",
+    "trace": "ट्रेस",
+    "hints": "संकेत",
+    "voice": "आवाज़",
+    "chat": "चैट",
+    "verified": "Oracle सत्यापित",
+    "unverified": "असत्यापित",
+    "disabled_here": "यहाँ अक्षम है"
+  },
+  "hint": {
+    "locked": "इस संकेत को खोलने के लिए और प्रयास करें।",
+    "unlock_after": "{{requirement}} के बाद अनलॉक होगा"
+  },
+  "lang": {
+    "en": "अंग्रेज़ी",
+    "hi": "हिंदी",
+    "mr": "मराठी"
+  }
+}

@@ -1,0 +1,111 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: #0f0f1a;
+  color: #e2e8f0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 16px;
+}
+
+.options-wrap {
+  width: 100%;
+  max-width: 480px;
+}
+
+.options-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.logo { font-size: 2rem; }
+h1 { font-size: 1.25rem; font-weight: 700; color: #f8fafc; }
+.subtitle { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+
+.card {
+  background: #1a1a2e;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: -4px;
+}
+
+.field-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.field-input:focus { border-color: #22c55e; }
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-primary {
+  flex: 1;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-primary:hover { opacity: 0.85; }
+
+.btn-secondary {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-secondary:hover { border-color: #22c55e; color: #e2e8f0; }
+
+.health-status {
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: monospace;
+}
+.health-status.ok { background: #14532d; color: #bbf7d0; }
+.health-status.err { background: #450a0a; color: #fecaca; }
+
+.options-footer {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 0.75rem;
+  color: #334155;
+}
