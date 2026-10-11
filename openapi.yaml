@@ -119,7 +119,7 @@ paths:
     post:
       summary: Create an anonymous learner
       responses:
-        "200": {description: ok, content: {application/json: {example: {user_id: mock-user-1}}}}
+        "200": {description: "user_token authenticates this learner on chat/profile endpoints (X-User-Token); shown once", content: {application/json: {example: {user_id: mock-user-1, user_token: "..."}}}}
   /problems/capture:
     post:
       summary: Store a captured LeetCode problem (idempotent by content_hash)
@@ -229,6 +229,56 @@ paths:
       parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
       responses:
         "200": {description: ok, content: {application/json: {example: {deleted_documents: 42, deleted_snapshot: true}}}}
+  /chat/consent-info:
+    get:
+      summary: "[FEATURE_CHAT] Text for the permission dialog shown when the chat panel opens"
+      responses:
+        "200": {description: ok, content: {application/json: {example: {version: "1", scope: leetcode_public_profile, title: "Allow CodeQuest AI to use your public LeetCode profile?", text: "...", data_accessed: ["solved statistics", "languages"], not_accessed: ["private submissions"], retention: "until you withdraw permission or delete your data", can_revoke: true}}}}
+  /chat/consent:
+    get:
+      summary: "[FEATURE_CHAT] Current consent + profile summary (learner from X-User-Token or user_id)"
+      responses: {"200": {description: ok}}
+    post:
+      summary: "[FEATURE_CHAT] Learner allows access: record consent, fetch + index the PUBLIC LeetCode profile"
+      requestBody: {required: true, content: {application/json: {example: {leetcode_username: Sahil-memane}}}}
+      responses:
+        "200": {description: "granted=true; profile_synced=false with sync_error when LeetCode is unreachable (chat still works)", content: {application/json: {example: {granted: true, leetcode_username: Sahil-memane, profile_synced: true, sync_error: null, summary: {solved: {All: 231}}}}}}
+    delete:
+      summary: "[FEATURE_CHAT] Withdraw permission: deletes snapshot row, JSON file and vector index"
+      responses: {"200": {description: ok}}
+  /chat/threads:
+    post:
+      summary: "[FEATURE_CHAT] Start a chat about a captured problem"
+      requestBody: {required: true, content: {application/json: {example: {problem_slug: binary-search, language: en}}}}
+      responses:
+        "200": {description: ok, content: {application/json: {example: {thread_id: a1455c37, problem_slug: binary-search, title: Binary Search, language: en, personalized: true}}}}
+        "422": {description: UNSUPPORTED_PROBLEM (not captured), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+    get:
+      summary: "[FEATURE_CHAT] Learner's own threads"
+      responses: {"200": {description: ok}}
+  /chat/threads/{thread_id}:
+    get:
+      summary: "[FEATURE_CHAT] Thread with messages (owner only; foreign or missing id -> 403)"
+      parameters: [{name: thread_id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: ok}, "403": {description: FORBIDDEN}}
+    delete:
+      summary: "[FEATURE_CHAT] Delete a thread and its messages"
+      parameters: [{name: thread_id, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {description: ok}}
+  /chat/threads/{thread_id}/messages:
+    post:
+      summary: "[FEATURE_CHAT] Send a message. JSON reply, or SSE (?stream=true / Accept: text/event-stream): events meta, token*, done"
+      description: |
+        Identity: send X-User-Token (from POST /users); a different user_id in the body is FORBIDDEN. Replies are Guard-checked
+        before any byte is streamed. A request for the full solution is refused without calling a model.
+      parameters: [{name: thread_id, in: path, required: true, schema: {type: string}}, {name: stream, in: query, schema: {type: boolean}}]
+      requestBody: {required: true, content: {application/json: {example: {content: "Why does my code fail?", language: null}}}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              example: {thread_id: a1455c37, user_message_id: 1, message_id: 2, reply: {content: "...", language: en, mode: llm, intent: why_failing, guard: {passed: true, retries: 0, source: llm}, tools_used: [run_analysis, get_history], sources: [], personalized: true, allowed_hint_level: 1}}
   /tts:
     post:
       summary: Text to speech (Agents-owned; mock returns browser fallback)

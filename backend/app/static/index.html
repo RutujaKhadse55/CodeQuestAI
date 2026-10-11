@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeQuest chat (dev)</title>
+<style>
+  :root { --bg:#FAFAFA; --fg:#0C0C0C; --card:#fff; --line:#d9d3e6; --accent:#381574; --accent2:#A200FF; --muted:#6b6480; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0C0C0C; --fg:#FAFAFA; --card:#17131f; --line:#34294d; --muted:#a79fbd; } }
+  body { margin:0; font:14px/1.5 Poppins, system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:880px; margin:0 auto; padding:16px; display:grid; gap:12px; }
+  h1 { font-size:18px; margin:0; color:var(--accent2); } h2 { font-size:14px; margin:0 0 6px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input, select, button, textarea { font:inherit; padding:7px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  button { background:var(--accent); color:#fff; border:0; cursor:pointer; } button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; } input.grow { flex:1; min-width:160px; }
+  #log { height:320px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 10px; border-radius:10px; max-width:85%; white-space:pre-wrap; } .user { align-self:flex-end; background:var(--accent); color:#fff; }
+  .bot { align-self:flex-start; background:var(--bg); border:1px solid var(--line); } .meta { font-size:11px; color:var(--muted); margin-top:4px; }
+  .note { color:var(--muted); font-size:12px; } .ok { color:#00966E; } .bad { color:#D62612; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CodeQuest AI — problem chat (dev test page)</h1>
+  <p class="note">Manual test of the backend chat + profile-consent flow. This is not the extension UI.</p>
+
+  <div class="card"><h2>1. Connect</h2>
+    <div class="row"><input id="token" class="grow" placeholder="API token (X-API-Token)" value="change-me">
+    <button id="mkuser">Create learner</button><span id="who" class="note"></span></div></div>
+
+  <div class="card"><h2>2. Problem on the page</h2>
+    <div class="row"><select id="slug"><option>binary-search</option><option>two-sum</option><option>maximum-subarray</option></select>
+    <button id="capture">Capture problem</button><span id="capState" class="note"></span></div></div>
+
+  <div class="card"><h2>3. Personalisation (asked when the chat opens)</h2>
+    <p id="consentText" class="note"></p>
+    <div class="row"><input id="lcuser" class="grow" placeholder="Your public LeetCode username">
+    <button id="allow">Allow &amp; fetch my profile</button><button id="decline" class="ghost">Not now</button>
+    <button id="revoke" class="ghost">Withdraw permission</button></div><p id="consentState" class="note"></p></div>
+
+  <div class="card"><h2>4. Chat</h2>
+    <div class="row"><button id="newthread">Start chat about this problem</button><span id="threadState" class="note"></span></div>
+    <div id="log"></div>
+    <div class="row" style="margin-top:8px"><input id="msg" class="grow" placeholder="Ask about the problem… (try: give me the full solution)"><button id="send" disabled>Send</button></div></div>
+</main>
+<script>
+const $ = id => document.getElementById(id); const st = { uid: localStorage.cq_uid, utok: localStorage.cq_utok, tid: null };
+const hdr = () => ({ 'Content-Type': 'application/json', 'X-API-Token': $('token').value, ...(st.utok ? { 'X-User-Token': st.utok } : {}) });
+const api = async (m, p, b) => { const r = await fetch(p, { method: m, headers: hdr(), body: b ? JSON.stringify(b) : undefined }); const t = await r.text();
+  try { return { ok: r.ok, status: r.status, data: JSON.parse(t) }; } catch { return { ok: r.ok, status: r.status, data: t }; } };
+const say = (cls, text, meta) => { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text;
+  if (meta) { const m = document.createElement('div'); m.className = 'meta'; m.textContent = meta; d.appendChild(m); } $('log').appendChild(d); $('log').scrollTop = 1e9; return d; };
+const show = () => { $('who').textContent = st.uid ? 'learner ' + st.uid.slice(0, 8) + '…' : ''; };
+show();
+api('GET', '/chat/consent-info').then(r => { $('consentText').textContent = r.ok ? r.data.text : 'Chat is disabled (FEATURE_CHAT=0): ' + JSON.stringify(r.data); });
+$('mkuser').onclick = async () => { const r = await api('POST', '/users'); if (r.ok) { st.uid = r.data.user_id; st.utok = r.data.user_token; localStorage.cq_uid = st.uid; localStorage.cq_utok = st.utok; show(); } else $('who').textContent = 'failed: ' + r.status; };
+$('capture').onclick = async () => { const s = $('slug').value; const f = await fetch('/dev/fixtures/' + s + '/problem.json'); if (!f.ok) { $('capState').textContent = 'fixture not found'; return; }
+  const r = await api('POST', '/problems/capture', await f.json()); $('capState').textContent = r.ok ? (r.data.supported ? 'captured ✔' : 'captured (explanation-only: ' + r.data.reason + ')') : 'failed ' + r.status; };
+const cs = d => { $('consentState').innerHTML = d.granted ? '<span class="ok">Allowed</span> for ' + d.leetcode_username + (d.profile_synced ? ' — profile fetched: solved ' + (d.summary?.solved?.All ?? '?') + ', streak ' + (d.summary?.streak ?? '?') : ' — profile not fetched' + (d.sync_error ? ' (' + d.sync_error.message + ')' : '')) : 'Personalisation is off — chat still works.'; };
+$('allow').onclick = async () => { $('consentState').textContent = 'Fetching profile…'; const r = await api('POST', '/chat/consent', { leetcode_username: $('lcuser').value }); r.ok ? cs(r.data) : $('consentState').innerHTML = '<span class="bad">' + (r.data.localized || r.status) + '</span>'; };
+$('decline').onclick = () => { $('consentState').textContent = 'Personalisation is off — chat still works.'; };
+$('revoke').onclick = async () => { const r = await api('DELETE', '/chat/consent'); if (r.ok) { cs(r.data); $('consentState').textContent += ' Profile data deleted.'; } };
+$('newthread').onclick = async () => { const r = await api('POST', '/chat/threads', { problem_slug: $('slug').value }); if (!r.ok) { $('threadState').innerHTML = '<span class="bad">' + (r.data.message || r.status) + '</span>'; return; }
+  st.tid = r.data.thread_id; $('log').innerHTML = ''; $('send').disabled = false; $('threadState').textContent = r.data.personalized ? 'personalised ✔' : 'not personalised'; };
+$('send').onclick = async () => { const text = $('msg').value.trim(); if (!text || !st.tid) return; $('msg').value = ''; say('user', text);
+  const res = await fetch('/chat/threads/' + st.tid + '/messages?stream=true', { method: 'POST', headers: hdr(), body: JSON.stringify({ content: text }) });
+  if (!res.ok) { say('bot', 'Error: ' + (await res.text())); return; }
+  const bubble = say('bot', ''); let meta = {}, done = {}; const rd = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+  for (;;) { const { value, done: fin } = await rd.read(); if (fin) break; buf += dec.decode(value, { stream: true }); let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) { const blk = buf.slice(0, i); buf = buf.slice(i + 2); const ev = blk.match(/^event: (\w+)/)[1]; const data = JSON.parse(blk.split('\ndata: ')[1]);
+      if (ev === 'meta') meta = data; else if (ev === 'token') { bubble.firstChild ? bubble.firstChild.nodeValue += data.text : bubble.append(data.text); } else if (ev === 'done') done = data; } }
+  const m = document.createElement('div'); m.className = 'meta'; m.textContent = [meta.mode, meta.language, 'tools: ' + (meta.tools_used || []).join(',') || '-', 'guard: ' + (done.guard?.passed ? 'ok' : '?') + '/' + done.guard?.source, meta.personalized ? 'personalised' : '', (done.sources || []).length ? 'sources: ' + done.sources.join(',') : ''].filter(Boolean).join(' · '); bubble.appendChild(m); };
+$('msg').addEventListener('keydown', e => { if (e.key === 'Enter') $('send').click(); });
+</script>
+</body>
+</html>

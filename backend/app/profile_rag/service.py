@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlmodel import Session
 
@@ -23,6 +25,32 @@ def _store():
         return store.get_store()
     except store.RagUnavailable as e:
         raise ApiError(ErrorCode.UPSTREAM_FAILED, f"profile RAG unavailable: {e}")
+
+
+def _snapshot_file(username: str) -> Path:
+    return Path(config.PROFILE_SNAPSHOT_DIR) / f"profile_{username}.json"
+
+
+def _write_snapshot(profile: dict) -> str | None:
+    """Spec §11: a JSON snapshot is written (git-ignored under backend/data). Failure to write is not fatal."""
+    try:
+        path = _snapshot_file(profile["username"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(profile, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        return str(path)
+    except OSError:
+        return None
+
+
+def _remove_snapshot_file(session: Session, snap: LeetCodeProfileSnapshot) -> None:
+    from sqlmodel import select
+    others = session.exec(select(LeetCodeProfileSnapshot).where(
+        LeetCodeProfileSnapshot.username == snap.username, LeetCodeProfileSnapshot.user_id != snap.user_id)).first()
+    if others is None:  # another learner may have synced the same public username
+        try:
+            os.remove(_snapshot_file(snap.username))
+        except OSError:
+            pass
 
 
 def snapshot_summary(snap: LeetCodeProfileSnapshot) -> dict:
@@ -56,6 +84,7 @@ def sync(session: Session, user_id: str, username: str, force: bool = False) -> 
     session.add(snap)
     session.commit()
     return {"status": "synced", "username": snap.username, "documents": count,
+            "snapshot_path": _write_snapshot(profile),
             "section_status": profile.get("section_status", {}), "warnings": profile.get("fetch_warnings", []),
             "summary": summarize(profile)}
 
@@ -66,6 +95,13 @@ def ask(session: Session, user_id: str, question: str, k: int = 16) -> dict:
         raise ApiError(ErrorCode.VALIDATION_ERROR, "no LeetCode profile synced yet; call /profile/sync first")
     hits = _store().search(user_id, question, k=k)
     return {**answerer.answer_question(snap.username, question, hits), "username": snap.username}
+
+
+def retrieve_evidence(session: Session, user_id: str, question: str, k: int = 8) -> list[dict]:
+    """Evidence documents for ONE authenticated learner (never by LeetCode username alone). [] if not synced."""
+    if session.get(LeetCodeProfileSnapshot, user_id) is None:
+        return []
+    return _store().search(user_id, question, k=k)
 
 
 def status(session: Session, user_id: str) -> dict:
@@ -90,4 +126,5 @@ def delete(session: Session, user_id: str) -> dict:
     if snap:
         session.delete(snap)
         session.commit()
+        _remove_snapshot_file(session, snap)
     return {"deleted_documents": removed, "deleted_snapshot": snap is not None}

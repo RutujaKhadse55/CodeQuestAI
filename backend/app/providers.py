@@ -114,3 +114,42 @@ def hardcode_detector() -> Callable[[str, list], list[str]]:
         return _hardcode
     from .engine.hardcode import detect  # Backend fallback
     return detect
+
+
+# ---- chat hooks owned by AI / Agents; Backend defaults keep the problem chat working on its own ----
+_guard = None
+_hint_service: Callable[[str, str, int, dict], str | None] | None = None
+_concept_service: Callable[[str, str], str | None] | None = None
+
+
+def register_guard(g) -> None:
+    """AI's Guard (Protocol: check(text, ctx) -> GuardResult) replaces Backend's DefaultGuard."""
+    global _guard
+    _guard = g
+
+
+def guard():
+    if _guard:
+        return _guard
+    from .chat.guard import DefaultGuard
+    return DefaultGuard()
+
+
+def register_hint_service(fn: Callable[[str, str, int, dict], str | None]) -> None:
+    """AI's HintService: fn(user_id, problem_slug, level, ctx) -> guarded hint text (or None)."""
+    global _hint_service
+    _hint_service = fn
+
+
+def hint_service():
+    return _hint_service
+
+
+def register_concept_service(fn: Callable[[str, str], str | None]) -> None:
+    """Approved learning content: fn(concept, language) -> explanation (or None to fall back to the LLM)."""
+    global _concept_service
+    _concept_service = fn
+
+
+def concept_service():
+    return _concept_service

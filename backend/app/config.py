@@ -41,3 +41,9 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 PROFILE_SYNC_MIN_INTERVAL_S = int(os.getenv("PROFILE_SYNC_MIN_INTERVAL_S", "600"))  # be gentle with LeetCode
+
+# Per-learner authentication for chat / profile endpoints (X-User-Token issued by POST /users).
+# Off by default so existing clients keep working; turn on for any shared deployment.
+REQUIRE_USER_TOKEN = _flag("REQUIRE_USER_TOKEN")
+PROFILE_SNAPSHOT_DIR = os.getenv("PROFILE_SNAPSHOT_DIR", "./data/profiles")  # profile_<username>.json (git-ignored)
+FEATURE_DEV_UI = _flag("FEATURE_DEV_UI")  # serves backend/app/static/dev_chat.html at /dev/ (manual testing only)

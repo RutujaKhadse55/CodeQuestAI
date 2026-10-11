@@ -1,7 +1,10 @@
 import importlib
 import os
 
+import tempfile
+
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")  # before any app import
+os.environ.setdefault("PROFILE_SNAPSHOT_DIR", tempfile.mkdtemp(prefix="cq_profiles_"))
 
 import pytest
 from fastapi.testclient import TestClient

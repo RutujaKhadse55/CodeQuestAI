@@ -5,7 +5,9 @@ from sqlmodel import Session, delete, select
 
 from .. import providers
 from ..db.models_core import (ApiToken, Attempt, ConceptMastery, DiagnosisRow, HabitEvent, HintState,
-                              LeetCodeProfileSnapshot, TestResultRow, User, UserMistakeCount, UserSettings)
+                              ChatMessage, ChatThread, LeetCodeProfileSnapshot, ProfileConsent, TestResultRow, User,
+                              UserMistakeCount, UserSettings)
+from ..auth import issue_user_token
 from ..deps import get_session
 from ..profile_rag import service as profile_rag
 
@@ -17,7 +19,8 @@ def create_user(session: Session = Depends(get_session)):
     user = User(user_id=uuid.uuid4().hex)
     session.add(user)
     session.commit()
-    return {"user_id": user.user_id}
+    # user_token authenticates THIS learner on chat/profile endpoints (X-User-Token); shown once, store it client-side
+    return {"user_id": user.user_id, "user_token": issue_user_token(session, user.user_id)}
 
 
 @router.delete("/users/{user_id}/data")
@@ -39,6 +42,11 @@ def delete_user_data(user_id: str, session: Session = Depends(get_session)):
     wipe("concept_mastery", ConceptMastery, ConceptMastery.user_id == user_id)
     wipe("user_mistake_counts", UserMistakeCount, UserMistakeCount.user_id == user_id)
     wipe("user_settings", UserSettings, UserSettings.user_id == user_id)
+    thread_ids = list(session.exec(select(ChatThread.id).where(ChatThread.user_id == user_id)).all())
+    if thread_ids:
+        wipe("chat_messages", ChatMessage, ChatMessage.thread_id.in_(thread_ids))
+    wipe("chat_threads", ChatThread, ChatThread.user_id == user_id)
+    wipe("profile_consents", ProfileConsent, ProfileConsent.user_id == user_id)
     wipe("leetcode_profile_snapshots", LeetCodeProfileSnapshot, LeetCodeProfileSnapshot.user_id == user_id)
     wipe("api_tokens", ApiToken, ApiToken.user_id == user_id)
     wipe("users", User, User.user_id == user_id)

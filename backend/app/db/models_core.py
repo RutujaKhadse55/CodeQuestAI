@@ -128,3 +128,36 @@ class LeetCodeProfileSnapshot(SQLModel, table=True):
     payload_json: str
     docs_indexed: int = 0
     fetched_at: datetime = Field(default_factory=_now)
+
+
+class ProfileConsent(SQLModel, table=True):
+    """The learner's explicit permission to read their PUBLIC LeetCode profile for personalised chat."""
+    __tablename__ = "profile_consents"
+    user_id: str = Field(primary_key=True)
+    granted: bool = False
+    scope: str = "leetcode_public_profile"
+    consent_version: str = "1"
+    leetcode_username: str | None = None
+    granted_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ChatThread(SQLModel, table=True):
+    __tablename__ = "chat_threads"
+    id: str = Field(primary_key=True)
+    user_id: str = Field(index=True)
+    problem_slug: str = Field(index=True)
+    title: str = ""
+    language: str = "en"
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class ChatMessage(SQLModel, table=True):
+    __tablename__ = "chat_messages"
+    id: int | None = Field(default=None, primary_key=True)
+    thread_id: str = Field(index=True)
+    role: str  # user | assistant
+    content: str
+    meta_json: str | None = None  # tools used, guard result, mode, sources (never hidden-test data)
+    created_at: datetime = Field(default_factory=_now)

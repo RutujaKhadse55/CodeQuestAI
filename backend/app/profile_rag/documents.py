@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 
 
 def _json_text(value) -> str:
@@ -15,6 +16,14 @@ def _json_text(value) -> str:
 
 def _stable_id(user_id: str, section: str, text: str) -> str:
     return hashlib.sha256(f"{user_id}|{section}|{text}".encode("utf-8")).hexdigest()
+
+
+def utc_date(ts) -> str | None:
+    """Unix seconds (int or numeric string) -> timezone-aware ISO date (UTC), or None if it is not a timestamp."""
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 def profile_to_documents(profile: dict, user_id: str) -> list[dict]:
@@ -76,6 +85,7 @@ def profile_to_documents(profile: dict, user_id: str) -> list[dict]:
                                        "not total accepted problems."}
                     if active:
                         summary["latest_active_date_timestamp"] = max(active)
+                        summary["latest_active_date_utc"] = utc_date(max(active))
                     add("activity_calendar", "Submission calendar summary", summary)
                 else:
                     add("activity_calendar", "Submission calendar", "The API returned an unexpected calendar format.")
@@ -87,7 +97,10 @@ def profile_to_documents(profile: dict, user_id: str) -> list[dict]:
     recent = profile.get("recent_accepted") or []
     if recent:
         for item in recent:
-            add("recent_accepted", f"Recent accepted problem: {item.get('title', 'Unknown')}", item)
+            # recentAcSubmissionList only returns ACCEPTED submissions (the "Ac" in the query), so the label is
+            # source-confirmed; the date is converted from Unix time to an explicit UTC datetime.
+            add("recent_accepted", f"Recent accepted problem: {item.get('title', 'Unknown')}",
+                {**item, "date_utc": utc_date(item.get("timestamp"))})
     else:
         add("recent_accepted", "Recent accepted problems", "No recent accepted submissions were returned.")
 

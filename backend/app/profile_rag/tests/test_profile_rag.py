@@ -383,7 +383,8 @@ def test_gemini_retries_transient_errors_then_succeeds(monkeypatch):
             return Resp()
 
     class Client:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kw):
+            assert kw.get('http_options', {}).get('timeout') == answerer.CALL_TIMEOUT_MS
             self.models = Models()
 
     monkeypatch.setattr(genai, "Client", Client)

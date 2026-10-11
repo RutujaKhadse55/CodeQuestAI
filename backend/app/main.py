@@ -50,6 +50,17 @@ if config.MOCK:
     from .mock import router as mock_router
     app.include_router(mock_router)
 
+# FEATURE_DEV_UI=1: manual test page for the chat + consent flow at /dev/ (static files are not behind the API token;
+# every API call the page makes is). Off by default; never enable on a shared deployment.
+if config.FEATURE_DEV_UI:
+    from pathlib import Path
+    from fastapi.staticfiles import StaticFiles
+    _root = Path(__file__).resolve()
+    _fixtures = _root.parents[2] / "fixtures" / "lc"
+    if _fixtures.is_dir():
+        app.mount("/dev/fixtures", StaticFiles(directory=_fixtures), name="dev-fixtures")
+    app.mount("/dev", StaticFiles(directory=_root.parent / "static", html=True), name="dev-ui")
+
 # Router autoload: every routers/*.py exposing `router` is mounted (plan §3.1 rule 4).
 for m in pkgutil.iter_modules(routers.__path__):
     mod = importlib.import_module(f"{routers.__name__}.{m.name}")
