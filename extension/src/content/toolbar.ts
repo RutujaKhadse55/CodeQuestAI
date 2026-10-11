@@ -1,22 +1,21 @@
 // ─── Shadow-DOM Toolbar — content script ──────────────────────────────────
-// Injected into every https://leetcode.com/problems/* page.
-// Shows a floating Debug button when the user selects ANY text on the page.
-// Uses Shadow DOM to isolate styles from LeetCode's CSS.
+// Shows a floating "🔍 Debug" button on text selection anywhere on the page,
+// including the Monaco code editor.
+//
+// Monaco fix: LeetCode's code editor runs in the page's JS world.
+// Content scripts are isolated — window.monaco is undefined here.
+// We ask the Service Worker to run chrome.scripting.executeScript({ world:"MAIN" })
+// which can access window.monaco directly, bypassing both isolation and CSP.
 
 import { disabledReason } from "./guards";
 
-/** Returns false when the extension has been reloaded and this old
- *  content script's context is no longer valid. All chrome.runtime
- *  calls must be guarded by this check. */
+// ── context guard ─────────────────────────────────────────────────────────────
+
 function isContextValid(): boolean {
-  try {
-    return !!chrome.runtime?.id;
-  } catch {
-    return false;
-  }
+  try { return !!chrome.runtime?.id; } catch { return false; }
 }
 
-// ── styles — declared FIRST to avoid TDZ errors ───────────────────────────────
+// ── styles ────────────────────────────────────────────────────────────────────
 
 const TOOLBAR_CSS = `
   :host { all: initial; }
@@ -28,8 +27,8 @@ const TOOLBAR_CSS = `
     background: #1a1a2e;
     border: 1px solid #2d3a5e;
     border-radius: 8px;
-    padding: 6px 12px;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    padding: 6px 14px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.55);
     pointer-events: all;
     font-family: 'Inter', system-ui, sans-serif;
     font-size: 13px;
@@ -47,7 +46,7 @@ const TOOLBAR_CSS = `
     color: #fff;
     border: none;
     border-radius: 6px;
-    padding: 4px 12px;
+    padding: 4px 14px;
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
@@ -59,7 +58,7 @@ const TOOLBAR_CSS = `
     font-size: 12px;
     color: #94a3b8;
     white-space: nowrap;
-    max-width: 200px;
+    max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -69,18 +68,19 @@ const TOOLBAR_CSS = `
 
 let toolbarEl: HTMLDivElement | null = null;
 let shadowRoot: ShadowRoot | null = null;
+let lastSelectedText = "";
+let hostEl: HTMLDivElement | null = null;
 
-// ── toolbar setup ─────────────────────────────────────────────────────────────
+// ── toolbar init ──────────────────────────────────────────────────────────────
 
 function initToolbar(): void {
-  // Host sits at fixed position 0,0 — the toolbar inside is `position:fixed`
-  const host = document.createElement("div");
-  host.id = "codequest-toolbar-host";
-  host.style.cssText =
+  hostEl = document.createElement("div");
+  hostEl.id = "codequest-toolbar-host";
+  hostEl.style.cssText =
     "position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;";
-  document.documentElement.appendChild(host);
+  document.documentElement.appendChild(hostEl);
 
-  shadowRoot = host.attachShadow({ mode: "open" });
+  shadowRoot = hostEl.attachShadow({ mode: "open" });
 
   const style = document.createElement("style");
   style.textContent = TOOLBAR_CSS;
@@ -100,156 +100,109 @@ function initToolbar(): void {
   btn.addEventListener("click", onDebugClick);
   toolbarEl.appendChild(btn);
 
-  const status = document.createElement("span");
-  status.id = "cq-status";
-  toolbarEl.appendChild(status);
+  const statusEl = document.createElement("span");
+  statusEl.id = "cq-status";
+  toolbarEl.appendChild(statusEl);
 
-  // ── Show toolbar on any text selection (mouseup is most reliable) ─────────
+  // ── 1. Native selection (problem description, constraints, examples) ──────
   document.addEventListener("mouseup", handleMouseUp);
 
-  // ── Hide when clicking elsewhere ─────────────────────────────────────────
+  // ── 2. Monaco selection (code editor) ────────────────────────────────────
+  //    mouseup DOES bubble from inside Monaco to the .monaco-editor container.
+  //    But window.getSelection() is empty. We detect the mouseup here,
+  //    then ask the SW to read Monaco's selection from the page world.
+  watchForMonacoEditor();
+
+  // ── 3. Hide on outside click ──────────────────────────────────────────────
   document.addEventListener("mousedown", (e) => {
-    // Don't hide if the click is inside our shadow toolbar
-    if (!toolbarEl) return;
-    const path = e.composedPath();
-    if (!path.includes(host)) {
-      hideToolbar();
-    }
+    if (!e.composedPath().includes(hostEl!)) hideToolbar();
   });
 
-  // ── Also watch Monaco editor (loads lazily) ───────────────────────
-  watchMonacoEditor();
-
-  // ── Context menu from SW ──────────────────────────────────────────────────
+  // ── 4. Context menu ───────────────────────────────────────────────────────
   if (isContextValid()) {
     chrome.runtime.onMessage.addListener((msg: { type: string }) => {
       if (msg.type === "CONTEXT_MENU_DEBUG") onDebugClick();
     });
   }
 
-  console.info("[CQ] Toolbar ready — select any text to debug.");
+  console.info("[CQ] Toolbar ready.");
 }
 
-// ── Monaco editor support ─────────────────────────────────────────────────────
-// Monaco uses its own virtual DOM — window.getSelection() returns empty there.
-// We read the selection via the Monaco global API and attach mouseup directly
-// to the editor container so we don't miss events that don't bubble.
+// ── Monaco editor watcher ─────────────────────────────────────────────────────
 
-interface MonacoSelection { startLineNumber: number; endLineNumber: number; startColumn: number; endColumn: number; }
-interface MonacoModel { getValueInRange(sel: MonacoSelection): string; }
-interface MonacoEditor { getSelection(): MonacoSelection | null; getModel(): MonacoModel | null; getDomNode(): HTMLElement | null; }
-interface MonacoGlobal { editor?: { getEditors?(): MonacoEditor[] } }
+function watchForMonacoEditor(): void {
+  const attach = (el: HTMLElement) => {
+    if ((el as HTMLElement & { _cqDone?: boolean })._cqDone) return;
+    (el as HTMLElement & { _cqDone?: boolean })._cqDone = true;
 
-let lastMonacoRect: DOMRect | null = null;
-
-/** Read selected text from Monaco if window.getSelection() is empty */
-function getMonacoSelectedText(): string {
-  try {
-    const w = window as unknown as { monaco?: MonacoGlobal };
-    const editors = w.monaco?.editor?.getEditors?.() ?? [];
-    for (const editor of editors) {
-      const sel = editor.getSelection?.();
-      const model = editor.getModel?.();
-      if (sel && model) {
-        const text = model.getValueInRange(sel).trim();
-        if (text) return text;
-      }
-    }
-  } catch { /* Monaco not available */ }
-  return "";
-}
-
-/** Get rect of the Monaco editor cursor/selection for toolbar positioning */
-function getMonacoSelectionRect(editorEl: HTMLElement): DOMRect | null {
-  const cursor = editorEl.querySelector(".cursor") as HTMLElement | null;
-  if (cursor) return cursor.getBoundingClientRect();
-  const viewLine = editorEl.querySelector(".selected-text") as HTMLElement | null;
-  if (viewLine) return viewLine.getBoundingClientRect();
-  return editorEl.getBoundingClientRect();
-}
-
-/** Attach mouseup to Monaco editor container (may not bubble to document) */
-function attachMonacoListener(editorEl: HTMLElement): void {
-  editorEl.addEventListener("mouseup", () => {
-    // Delay so Monaco finalises its internal selection
-    setTimeout(() => {
-      const text = getMonacoSelectedText();
-      if (text.length < 2) { hideToolbar(); return; }
-      const rect = getMonacoSelectionRect(editorEl);
-      lastMonacoRect = rect;
-      if (rect) showToolbarAt(rect);
-    }, 60);
-  });
-  console.info("[CQ] Attached to Monaco editor.");
-}
-
-/** Watch for Monaco editor appearing in the DOM (it loads lazily) */
-function watchMonacoEditor(): void {
-  const tryAttach = () => {
-    const editors = document.querySelectorAll(".monaco-editor");
-    editors.forEach((el) => {
-      if (!(el as HTMLElement).dataset.cqAttached) {
-        (el as HTMLElement).dataset.cqAttached = "1";
-        attachMonacoListener(el as HTMLElement);
-      }
+    el.addEventListener("mouseup", () => {
+      // Give Monaco ~100ms to finalise its internal selection state
+      setTimeout(askSwForMonacoSelection, 100);
     });
+    console.info("[CQ] Attached mouseup to Monaco editor container.");
   };
 
-  tryAttach(); // immediate attempt
+  const scan = () =>
+    document.querySelectorAll<HTMLElement>(".monaco-editor").forEach(attach);
 
-  // Also observe DOM for Monaco appearing later
-  const obs = new MutationObserver(tryAttach);
+  scan(); // immediate
+  const obs = new MutationObserver(scan);
   obs.observe(document.body, { childList: true, subtree: true });
 }
 
-// ── selection handling (native + Monaco) ──────────────────────────────────────
+async function askSwForMonacoSelection(): Promise<void> {
+  if (!isContextValid()) return;
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "GET_MONACO_SELECTION" }) as {
+      text: string;
+      top: number; bottom: number; left: number; right: number;
+    } | null;
+
+    if (result?.text && result.text.length >= 1) {
+      lastSelectedText = result.text;
+      // Build a DOMRect from the returned values for toolbar positioning
+      const rect = new DOMRect(
+        result.left,
+        result.top,
+        result.right - result.left,
+        result.bottom - result.top
+      );
+      showToolbarAt(rect);
+    }
+  } catch {
+    // SW not available — ignore silently
+  }
+}
+
+// ── native mouse-up handler ───────────────────────────────────────────────────
 
 function handleMouseUp(): void {
-  // Small delay so the selection is finalised
   setTimeout(() => {
-    // 1. Try native browser selection (description, constraints, examples)
     const sel = window.getSelection();
-    const nativeText = sel?.toString().trim() ?? "";
+    const text = sel?.toString().trim() ?? "";
 
-    if (nativeText.length >= 2 && sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
+    if (text.length >= 2 && sel && sel.rangeCount > 0) {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
       if (rect.width > 0 || rect.height > 0) {
+        lastSelectedText = text;
         showToolbarAt(rect);
         return;
       }
     }
-
-    // 2. Try Monaco editor selection (code panel)
-    const monacoText = getMonacoSelectedText();
-    if (monacoText.length >= 2) {
-      // Monaco fires its own mouseup listener; we just ensure we're covered
-      // if the event does bubble up to document.
-      const monacoEl = document.querySelector(".monaco-editor") as HTMLElement | null;
-      const rect = monacoEl ? getMonacoSelectionRect(monacoEl) : lastMonacoRect;
-      if (rect) showToolbarAt(rect);
-      return;
-    }
-
-    hideToolbar();
+    // If no native selection and Monaco didn't fire, hide
+    // (Monaco fires its own listener above — don't hide here)
   }, 30);
 }
 
+// ── positioning ───────────────────────────────────────────────────────────────
+
 function showToolbarAt(rect: DOMRect): void {
   if (!toolbarEl) return;
-
-  // Position: above the selection, horizontally centred
-  const TOOLBAR_HEIGHT = 40;
-  const TOOLBAR_WIDTH = 140; // approximate
-  const MARGIN = 8;
-
-  let top = rect.top - TOOLBAR_HEIGHT - MARGIN;
-  // If not enough room above, show below
-  if (top < MARGIN) top = rect.bottom + MARGIN;
-
-  let left = rect.left + rect.width / 2 - TOOLBAR_WIDTH / 2;
-  left = Math.max(MARGIN, Math.min(left, window.innerWidth - TOOLBAR_WIDTH - MARGIN));
-
+  const TH = 42, TW = 160, M = 8;
+  let top = rect.top - TH - M;
+  if (top < M) top = rect.bottom + M;
+  let left = rect.left + rect.width / 2 - TW / 2;
+  left = Math.max(M, Math.min(left, window.innerWidth - TW - M));
   toolbarEl.style.top = `${top}px`;
   toolbarEl.style.left = `${left}px`;
   toolbarEl.classList.add("visible");
@@ -259,57 +212,42 @@ function hideToolbar(): void {
   toolbarEl?.classList.remove("visible");
 }
 
-// ── debug action ──────────────────────────────────────────────────────────────
+// ── debug click ───────────────────────────────────────────────────────────────
 
 function onDebugClick(): void {
   if (!isContextValid()) {
-    // Extension was reloaded — remove the stale toolbar
     document.getElementById("codequest-toolbar-host")?.remove();
     return;
   }
 
-  // Try native selection first, then Monaco
-  const selectedText =
-    window.getSelection()?.toString().trim() ||
-    getMonacoSelectedText();
-
-  if (!selectedText) {
+  const text = window.getSelection()?.toString().trim() || lastSelectedText;
+  if (!text) {
     showStatus("Select some code or text first!");
     return;
   }
 
   showStatus("Checking backend…");
-
   chrome.runtime
     .sendMessage({ type: "HEALTH_CHECK" })
-    .then((res: { error?: string; version?: string } | undefined) => {
-      if (res?.error) {
-        showStatus("⚠️ Backend offline — start the server");
-      } else {
-        showStatus(`✅ Backend OK`);
-        setTimeout(() => hideToolbar(), 1500);
-      }
+    .then((res: { error?: string } | undefined) => {
+      showStatus(res?.error ? "⚠️ Backend offline" : "✅ Backend OK");
+      if (!res?.error) setTimeout(hideToolbar, 1500);
     })
-    .catch(() => {
-      showStatus("⚠️ Backend not reachable");
-    });
+    .catch(() => showStatus("⚠️ Backend not reachable"));
 }
 
 function showStatus(text: string): void {
-  const status = shadowRoot?.getElementById("cq-status");
-  if (!status) return;
-  status.textContent = text;
-  setTimeout(() => { status.textContent = ""; }, 4000);
+  const el = shadowRoot?.getElementById("cq-status");
+  if (!el) return;
+  el.textContent = text;
+  setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
 // ── entry point ───────────────────────────────────────────────────────────────
 
 function main(): void {
   const reason = disabledReason();
-  if (reason) {
-    console.info(`[CQ] ${reason} — toolbar disabled.`);
-    return;
-  }
+  if (reason) { console.info(`[CQ] ${reason}`); return; }
   initToolbar();
 }
 
