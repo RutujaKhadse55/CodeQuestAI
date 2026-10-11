@@ -5,6 +5,17 @@
 
 import { disabledReason } from "./guards";
 
+/** Returns false when the extension has been reloaded and this old
+ *  content script's context is no longer valid. All chrome.runtime
+ *  calls must be guarded by this check. */
+function isContextValid(): boolean {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
 // ── styles — declared FIRST to avoid TDZ errors ───────────────────────────────
 
 const TOOLBAR_CSS = `
@@ -107,9 +118,11 @@ function initToolbar(): void {
   });
 
   // ── Context menu from SW ──────────────────────────────────────────────────
-  chrome.runtime.onMessage.addListener((msg: { type: string }) => {
-    if (msg.type === "CONTEXT_MENU_DEBUG") onDebugClick();
-  });
+  if (isContextValid()) {
+    chrome.runtime.onMessage.addListener((msg: { type: string }) => {
+      if (msg.type === "CONTEXT_MENU_DEBUG") onDebugClick();
+    });
+  }
 
   console.info("[CQ] Toolbar ready — select any text to debug.");
 }
@@ -167,6 +180,12 @@ function hideToolbar(): void {
 // ── debug action ──────────────────────────────────────────────────────────────
 
 function onDebugClick(): void {
+  if (!isContextValid()) {
+    // Extension was reloaded — remove the stale toolbar
+    document.getElementById("codequest-toolbar-host")?.remove();
+    return;
+  }
+
   const selectedText = window.getSelection()?.toString().trim() ?? "";
   if (!selectedText) {
     showStatus("Select some code or text first!");
@@ -179,7 +198,7 @@ function onDebugClick(): void {
     .sendMessage({ type: "HEALTH_CHECK" })
     .then((res: { error?: string; version?: string } | undefined) => {
       if (res?.error) {
-        showStatus("⚠️ Backend offline");
+        showStatus("⚠️ Backend offline — start the server");
       } else {
         showStatus(`✅ Backend OK`);
         setTimeout(() => hideToolbar(), 1500);
