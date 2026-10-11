@@ -9,10 +9,14 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from .. import config, providers
 
 log = logging.getLogger(__name__)
+RETRIES = 2
+RETRY_BACKOFF_S = 2.0
+TRANSIENT_CODES = {429, 500, 502, 503, 504}
 
 SYSTEM_RULES = """You are CodeQuest AI, an assistant that analyzes a learner's PUBLIC LeetCode profile.
 Answer the learner's exact question in clear, useful language. Use ONLY the evidence inside <data>.
@@ -35,8 +39,18 @@ def _gemini(prompt: str) -> str | None:
         return None
     from google import genai  # lazy: only needed when the key is configured
     client = genai.Client(api_key=config.GEMINI_API_KEY)
-    text = getattr(client.models.generate_content(model=config.GEMINI_MODEL, contents=prompt), "text", None)
-    return text.strip() if text and text.strip() else ""
+    for attempt in range(RETRIES + 1):
+        try:
+            text = getattr(client.models.generate_content(model=config.GEMINI_MODEL, contents=prompt), "text", None)
+            return text.strip() if text and text.strip() else ""
+        except Exception as exc:  # noqa: BLE001
+            code = getattr(exc, "code", None)
+            if code in TRANSIENT_CODES and attempt < RETRIES:  # Gemini 5xx / 429 are often momentary
+                log.info("profile-rag Gemini transient error %s, retry %d", code, attempt + 1)
+                time.sleep(RETRY_BACKOFF_S * (attempt + 1))
+                continue
+            log.warning("profile-rag Gemini error code=%s type=%s", code, type(exc).__name__)
+            raise
 
 
 def answer_question(username: str, question: str, retrieved: list[dict]) -> dict:

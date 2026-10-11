@@ -359,3 +359,37 @@ def test_rag_unavailable_gives_clean_error(real_client, monkeypatch):
     r = real_client.post("/profile/sync", headers=H, json={"user_id": "u1", "username": "demo"})
     assert r.status_code == 502 and "profile RAG unavailable" in r.json()["message"]
     assert service.delete_index("u1") == 0  # delete-all must not fail when RAG is absent
+
+
+# ------------------------------------------------------------------ Gemini retry (fake client)
+def test_gemini_retries_transient_errors_then_succeeds(monkeypatch):
+    genai = pytest.importorskip("google.genai")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(answerer.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    class Boom(Exception):
+        def __init__(self, code):
+            self.code = code
+
+    class Resp:
+        text = " fine "
+
+    class Models:
+        def generate_content(self, model, contents):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise Boom(503)
+            return Resp()
+
+    class Client:
+        def __init__(self, api_key):
+            self.models = Models()
+
+    monkeypatch.setattr(genai, "Client", Client)
+    assert answerer._gemini("p") == "fine" and calls["n"] == 3
+
+    calls["n"] = 0
+    monkeypatch.setattr(Models, "generate_content", lambda self, model, contents: (_ for _ in ()).throw(Boom(400)))
+    with pytest.raises(Boom):  # non-transient errors are not retried
+        answerer._gemini("p")
