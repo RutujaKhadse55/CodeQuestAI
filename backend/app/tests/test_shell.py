@@ -21,7 +21,7 @@ def client(monkeypatch):
 def test_health_requires_token(client):
     assert client.get("/health").status_code == 401
     assert client.get("/health").json()["code"] == "UNAUTHORIZED"
-    assert client.get("/health", headers=H).json() == {"status": "ok"}
+    assert client.get("/health", headers=H).json() == {"status": "ok", "version": "0.1.0"}
 
 
 def test_mock_analyze_matches_contract_and_hides_fuzz(client):

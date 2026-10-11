@@ -28,7 +28,7 @@ def _analyze(c, code, slug="two-sum", **extra):
 def test_capture_is_idempotent_and_flags_unsupported(real_client):
     p = _fixture("two-sum")
     a = real_client.post("/problems/capture", headers=H, json=p).json()
-    assert a == {"problem_id": "two-sum", "supported": True, "reason": None}
+    assert a == {"problem_id": "two-sum", "slug": "two-sum", "supported": True, "reason": None}
     assert real_client.post("/problems/capture", headers=H, json=p).json() == a
     java = real_client.post("/problems/capture", headers=H, json={**p, "lang_selected": "java"}).json()
     assert java["supported"] is False and java["reason"] == "UNSUPPORTED_LANGUAGE"

@@ -18,7 +18,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="CodeQuest AI", lifespan=lifespan,
               dependencies=[Depends(require_token), Depends(rate_limit)])
 errors.install(app)
-app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS,
+app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_origin_regex=config.CORS_ORIGIN_REGEX,
                    allow_methods=["*"], allow_headers=["*"])
 
 # MOCK=1: canned example responses are mounted FIRST so they win over real routers.

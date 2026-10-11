@@ -8,6 +8,8 @@ def _flag(name: str, default: bool = False) -> bool:
 MOCK = _flag("MOCK")
 API_TOKEN = os.getenv("API_TOKEN", "change-me")
 CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
+# The extension calls through its service worker, but allow any extension origin for direct fetches.
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"^chrome-extension://[a-p]{32}$")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/codequest.db")
 SANDBOX_MODE = os.getenv("SANDBOX_MODE", "auto")  # docker | native | auto
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))

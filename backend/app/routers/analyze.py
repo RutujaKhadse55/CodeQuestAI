@@ -8,6 +8,7 @@ from ..contracts.models import AnalyzeRequest, AnalyzeResponse, LCProblem
 from ..db.models_core import Attempt, HabitEvent, LCProblemRow, TestResultRow, User
 from ..deps import get_session
 from ..engine import ast_policy
+from ..engine.lang import normalize_lang
 from ..engine.examples_parser import ParseError, args_for, parse_inputs
 from ..engine.sandbox.runner import SandboxUnavailable
 from ..engine.service import SandboxEngine
@@ -47,7 +48,7 @@ def build_tests(problem: LCProblem, req: AnalyzeRequest, params: list[str]) -> t
 @router.post("/analyze", response_model=AnalyzeResponse)
 def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
     """v0: policy -> run examples (+ Run capture) -> per-test outcomes. Fuzz/trace/diagnosis: Phase 2."""
-    if req.language != "python3":
+    if normalize_lang(req.language) != "python3":
         raise ApiError(ErrorCode.UNSUPPORTED_LANGUAGE, "only python3 is executed")
     row = session.get(LCProblemRow, req.problem_slug)
     if row is None:

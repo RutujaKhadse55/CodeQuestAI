@@ -4,6 +4,7 @@ Shapes follow contracts/models.py and the examples in openapi.yaml. Never contai
 """
 from fastapi import APIRouter, Response
 
+from ..engine.lang import normalize_lang
 from ..contracts.models import (AnalyzeResponse, CaptureResponse, Diagnosis,
                                 Divergence, GuardResult, HintResult, LCProblem,
                                 TestResult)
@@ -34,9 +35,9 @@ def users():
 @router.post("/problems/capture", response_model=CaptureResponse)
 def capture(problem: LCProblem):
     # Mirrors the plan: only python3 is executed; other languages = explanation-only.
-    if problem.lang_selected != "python3":
-        return CaptureResponse(problem_id=problem.slug, supported=False, reason="UNSUPPORTED_LANGUAGE")
-    return CaptureResponse(problem_id=problem.slug, supported=True)
+    if normalize_lang(problem.lang_selected) != "python3":
+        return CaptureResponse(problem_id=problem.slug, slug=problem.slug, supported=False, reason="UNSUPPORTED_LANGUAGE")
+    return CaptureResponse(problem_id=problem.slug, slug=problem.slug, supported=True)
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)

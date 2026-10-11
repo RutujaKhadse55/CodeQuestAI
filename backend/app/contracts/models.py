@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class Example(BaseModel):
@@ -103,15 +103,18 @@ class ErrorBody(BaseModel):
 
 class CaptureResponse(BaseModel):
     problem_id: str
+    slug: str | None = None  # additive: extension client reads `slug`
     supported: bool
     reason: str | None = None
 
 
 class AnalyzeRequest(BaseModel):
-    user_id: str
-    problem_slug: str
+    # Additive aliases so the extension's request shape ({slug, lang, lang_pref, ...}) is accepted as-is.
+    user_id: str = "local-user"
+    problem_slug: str = Field(validation_alias=AliasChoices("problem_slug", "slug"))
     code: str
-    language: str = "python3"
+    language: str = Field(default="python3", validation_alias=AliasChoices("language", "lang"))
+    lang_pref: str | None = None
     run_capture: RunCapture | None = None
     paste_chars: int = 0
     elapsed_ms: int = 0

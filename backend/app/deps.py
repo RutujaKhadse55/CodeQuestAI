@@ -16,14 +16,21 @@ def reset_rate_limits() -> None:
     _hits.clear()
 
 
-def require_token(x_api_token: str = Header(default="")) -> None:
-    if x_api_token != config.API_TOKEN:
+def _token(x_api_token: str, authorization: str) -> str:
+    """X-API-Token (curl/smoke) or `Authorization: Bearer` (the extension's API client)."""
+    if x_api_token:
+        return x_api_token
+    return authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+
+
+def require_token(x_api_token: str = Header(default=""), authorization: str = Header(default="")) -> None:
+    if _token(x_api_token, authorization) != config.API_TOKEN:
         raise ApiError(ErrorCode.UNAUTHORIZED, "missing or invalid X-API-Token")
 
 
-def rate_limit(request: Request, x_api_token: str = Header(default="")) -> None:
+def rate_limit(request: Request, x_api_token: str = Header(default=""), authorization: str = Header(default="")) -> None:
     """Sliding 60 s window per token+client (in-memory, single process)."""
-    key = f"{x_api_token}|{request.client.host if request.client else '-'}"
+    key = f"{_token(x_api_token, authorization)}|{request.client.host if request.client else '-'}"
     now, q = time.monotonic(), _hits[key]
     while q and now - q[0] > 60:
         q.popleft()

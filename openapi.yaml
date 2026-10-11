@@ -9,7 +9,7 @@ servers: [{url: "http://localhost:8000"}]
 security: [{ApiToken: []}]
 components:
   securitySchemes:
-    ApiToken: {type: apiKey, in: header, name: X-API-Token}
+    ApiToken: {type: apiKey, in: header, name: X-API-Token, description: "Also accepted: Authorization: Bearer <token> (used by the extension)"}
   schemas:
     ErrorBody:
       type: object
@@ -75,10 +75,12 @@ components:
         divergence: {allOf: [{$ref: "#/components/schemas/Divergence"}], nullable: true}
     AnalyzeRequest:
       type: object
-      required: [user_id, problem_slug, code]
+      required: [problem_slug, code]
+      description: "Aliases accepted: slug -> problem_slug, lang -> language. user_id defaults to local-user."
       properties:
-        user_id: {type: string}
+        user_id: {type: string, default: local-user}
         problem_slug: {type: string}
+        lang_pref: {type: string, nullable: true}
         code: {type: string}
         language: {type: string, default: python3}
         run_capture: {allOf: [{$ref: "#/components/schemas/RunCapture"}], nullable: true}
@@ -108,7 +110,7 @@ paths:
     get:
       summary: Liveness check (token required)
       responses:
-        "200": {description: ok, content: {application/json: {example: {status: ok}}}}
+        "200": {description: ok, content: {application/json: {example: {status: ok, version: 0.1.0}}}}
         "401": {description: UNAUTHORIZED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
   /users:
     post:
