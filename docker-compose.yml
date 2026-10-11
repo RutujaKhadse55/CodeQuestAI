@@ -1,6 +1,10 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports: ["8000:8000"]
-    env_file: [.env]
+    environment:
+      MOCK: "1"
+      API_TOKEN: change-me
     volumes: ["./backend/data:/app/data"]
