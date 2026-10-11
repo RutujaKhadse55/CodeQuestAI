@@ -5,8 +5,9 @@ from sqlmodel import Session, delete, select
 
 from .. import providers
 from ..db.models_core import (ApiToken, Attempt, ConceptMastery, DiagnosisRow, HabitEvent, HintState,
-                              TestResultRow, User, UserMistakeCount, UserSettings)
+                              LeetCodeProfileSnapshot, TestResultRow, User, UserMistakeCount, UserSettings)
 from ..deps import get_session
+from ..profile_rag import service as profile_rag
 
 router = APIRouter()
 
@@ -38,7 +39,13 @@ def delete_user_data(user_id: str, session: Session = Depends(get_session)):
     wipe("concept_mastery", ConceptMastery, ConceptMastery.user_id == user_id)
     wipe("user_mistake_counts", UserMistakeCount, UserMistakeCount.user_id == user_id)
     wipe("user_settings", UserSettings, UserSettings.user_id == user_id)
+    wipe("leetcode_profile_snapshots", LeetCodeProfileSnapshot, LeetCodeProfileSnapshot.user_id == user_id)
     wipe("api_tokens", ApiToken, ApiToken.user_id == user_id)
     wipe("users", User, User.user_id == user_id)
     session.commit()
-    return {"user_id": user_id, "deleted": deleted, "hooks": providers.run_deletion_hooks(user_id)}
+    hooks = providers.run_deletion_hooks(user_id)
+    try:  # LeetCode profile RAG index (Chroma); built-in, not dependent on hook registration
+        hooks["profile_rag"] = f"ok ({profile_rag.delete_index(user_id)} documents)"
+    except Exception as e:  # noqa: BLE001
+        hooks["profile_rag"] = f"error: {type(e).__name__}"
+    return {"user_id": user_id, "deleted": deleted, "hooks": hooks}

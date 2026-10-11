@@ -1,3 +1,4 @@
 -r requirements/base.txt
 -r requirements/ai.txt
 -r requirements/agents.txt
+-r requirements/profile_rag.txt

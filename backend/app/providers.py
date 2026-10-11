@@ -85,3 +85,16 @@ def run_deletion_hooks(user_id: str) -> dict[str, str]:
         except Exception as e:  # noqa: BLE001
             out[name] = f"error: {type(e).__name__}"
     return out
+
+
+# ---- LLM hook: AI's llm client registers `complete(prompt) -> str | None`; default None => answerer uses Gemini ----
+_llm: Callable[[str], str | None] | None = None
+
+
+def register_llm(fn: Callable[[str], str | None]) -> None:
+    global _llm
+    _llm = fn
+
+
+def llm() -> Callable[[str], str | None] | None:
+    return _llm

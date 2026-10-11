@@ -1,13 +1,13 @@
 # Production image (plan §6 Phase 3 item 7): non-root, optional baked MiniLM, native sandbox inside the container.
 # Build from the repo root:  docker build -f backend/Dockerfile -t codequest-backend .
-#   --build-arg EXTRAS="ai agents"   install requirements/ai.txt + agents.txt (default)
+#   --build-arg EXTRAS="ai agents profile_rag"   extra requirement files to install (default; drop profile_rag for a slim image)
 #   --build-arg BAKE_MINILM=1        pre-download sentence-transformers/all-MiniLM-L6-v2 (Agents' memory model)
 FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 \
     SANDBOX_MODE=native HF_HOME=/opt/hf DATABASE_URL=sqlite:///./data/codequest.db
 WORKDIR /srv
 COPY requirements/ requirements/
-ARG EXTRAS="ai agents"
+ARG EXTRAS="ai agents profile_rag"
 RUN pip install -r requirements/base.txt && for f in $EXTRAS; do pip install -r requirements/$f.txt; done
 ARG BAKE_MINILM=0
 RUN if [ "$BAKE_MINILM" = "1" ]; then \

@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, desc, select
 
 from .. import providers
-from ..db.models_core import Attempt, ConceptMastery, DiagnosisRow, UserMistakeCount
+from ..db.models_core import (Attempt, ConceptMastery, DiagnosisRow, LeetCodeProfileSnapshot,
+                              UserMistakeCount)
 from ..deps import get_session
 from ..mastery.profile import basic_profile
+from ..profile_rag.service import snapshot_summary
 
 router = APIRouter()
 
@@ -37,10 +39,12 @@ def dashboard(user_id: str, session: Session = Depends(get_session)):
     verified = {"oracle-verified": 0, "unverified": 0}
     for a in attempts:
         verified[a.verified] = verified.get(a.verified, 0) + 1
+    snap = session.get(LeetCodeProfileSnapshot, user_id)
     model = providers.learner_model()
     profile = model.summary(user_id) if model else basic_profile(session, user_id)
     return {"user_id": user_id, "mastery": mastery, "mistakes": mistakes,
             "heatmap": [{"problem_slug": p, "mistake_class": m, "count": c} for (p, m), c in sorted(heat.items())],
             "recent": recent, "verified": verified, "attempts": len(attempts),
             "solved": len({a.problem_slug for a in attempts if a.passed_all}),
-            "profile": profile, "credits": providers.credits(user_id)}
+            "profile": profile, "credits": providers.credits(user_id),
+            "leetcode": snapshot_summary(snap) if snap else None}

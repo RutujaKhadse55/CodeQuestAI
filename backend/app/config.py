@@ -1,4 +1,11 @@
 import os
+from pathlib import Path
+
+try:  # optional: read the untracked repo-root .env (real environment variables always win)
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+except ImportError:
+    pass
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -17,6 +24,7 @@ RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 
 # Feature flags: unfinished work merges behind a flag defaulting to off.
 FEATURE_CHAT = _flag("FEATURE_CHAT")
+FEATURE_PROFILE_RAG = _flag("FEATURE_PROFILE_RAG")  # LeetCode profile RAG (needs requirements/profile_rag.txt)
 FEATURE_MEMORY = _flag("FEATURE_MEMORY")
 FEATURE_PROFILE = _flag("FEATURE_PROFILE")
 FEATURE_VOICE_AGENT = _flag("FEATURE_VOICE_AGENT")
@@ -24,3 +32,10 @@ FEATURE_ORACLE_FOREIGN = _flag("FEATURE_ORACLE_FOREIGN")
 USE_REAL_AI = _flag("USE_REAL_AI")
 USE_REAL_VOICE = _flag("USE_REAL_VOICE")
 USE_REAL_ENGINE = _flag("USE_REAL_ENGINE")
+
+# LeetCode profile RAG (ported from codequest_leetcode_rag). Keys live in the untracked .env only.
+CHROMA_PATH = os.getenv("CHROMA_PATH", "./data/chroma")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+PROFILE_SYNC_MIN_INTERVAL_S = int(os.getenv("PROFILE_SYNC_MIN_INTERVAL_S", "600"))  # be gentle with LeetCode

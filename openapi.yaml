@@ -189,7 +189,7 @@ paths:
       responses:
         "200":
           description: ok
-          description: "v2: adds heatmap, profile (habits) and credits (null until Agents registers the meter)"
+          description: "v2: adds heatmap, profile (habits), credits (null until Agents registers the meter) and leetcode (summary of the synced public profile, else null)"
           content: {application/json: {example: {user_id: mock-user-1, mastery: {array: 874.4}, mistakes: {missing_edge_single: 2}, heatmap: [{problem_slug: binary-search, mistake_class: missing_edge_single, count: 2}], recent: [], verified: {oracle-verified: 1, unverified: 0}, attempts: 2, solved: 1, profile: {attempts: 2, solved: 1, habits: {paste_rate: 0.5, edge_case_miss_rate: 1.0}, top_mistakes: [], source: backend-basic}, credits: null}}}
   /recommend/{user_id}:
     get:
@@ -203,6 +203,32 @@ paths:
       parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
       responses:
         "200": {description: ok, content: {application/json: {example: {user_id: u1, deleted: {attempts: 2, test_results: 8, diagnoses: 1, concept_mastery: 2}, hooks: {memory: ok}}}}}
+  /profile/sync:
+    post:
+      summary: "[FEATURE_PROFILE_RAG] Fetch the learner's PUBLIC LeetCode profile, index it in Chroma, keep a snapshot"
+      description: "User-triggered. Same username within PROFILE_SYNC_MIN_INTERVAL_S (default 600 s) returns status=cached unless force=true."
+      requestBody: {required: true, content: {application/json: {example: {user_id: u1, username: Sahil-memane, force: false}}}}
+      responses:
+        "200": {description: ok, content: {application/json: {example: {status: synced, username: Sahil-memane, documents: 42, summary: {solved: {All: 60, Easy: 40}, top_languages: [{language: Python3, solved: 50}], contest_rating: 1650, streak: 7}}}}}
+        "422": {description: VALIDATION_ERROR (bad username / profile not found), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+        "502": {description: UPSTREAM_FAILED (LeetCode unreachable, RAG disabled/unavailable), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /profile/ask:
+    post:
+      summary: "[FEATURE_PROFILE_RAG] Ask a question about the synced LeetCode profile (retrieval + LLM, evidence-only without an LLM)"
+      requestBody: {required: true, content: {application/json: {example: {user_id: u1, question: "Which languages have I used?"}}}}
+      responses:
+        "200": {description: "mode is llm | evidence_only | llm_failed | no_data", content: {application/json: {example: {answer: "Mostly Python3.", mode: llm, sources: [languages], username: Sahil-memane}}}}
+  /profile/{user_id}:
+    get:
+      summary: "[FEATURE_PROFILE_RAG] Sync status and structured summary"
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: ok, content: {application/json: {example: {synced: true, username: Sahil-memane, documents: 42, fetched_at: "2026-10-11T09:00:00+00:00"}}}}
+    delete:
+      summary: "[FEATURE_PROFILE_RAG] Delete the learner's LeetCode snapshot and Chroma index"
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: ok, content: {application/json: {example: {deleted_documents: 42, deleted_snapshot: true}}}}
   /tts:
     post:
       summary: Text to speech (Agents-owned; mock returns browser fallback)
