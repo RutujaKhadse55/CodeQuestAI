@@ -1,0 +1,23 @@
+# Replace @TODO-* with real GitHub handles (plan §3.1 rule 1).
+# BE = Backend, FE = Frontend, AI = AI, AG = Agents
+*                                   @TODO-BE
+/extension/                         @TODO-FE
+/shared/locales/*/ui.json           @TODO-FE
+/shared/locales/*/mentor.json       @TODO-AI
+/shared/locales/*/chat.json         @TODO-AG
+/backend/app/ai/                    @TODO-AI
+/backend/app/agents/                @TODO-AG
+/backend/app/db/models_ai.py        @TODO-AI
+/backend/app/db/models_agents.py    @TODO-AG
+/backend/app/routers/explain.py     @TODO-AI
+/backend/app/routers/hint.py        @TODO-AI
+/backend/app/routers/i18n.py        @TODO-AI
+/backend/app/routers/admin_redteam.py @TODO-AI
+/backend/app/routers/chat.py        @TODO-AG
+/backend/app/routers/voice.py       @TODO-AG
+/backend/app/routers/explainback.py @TODO-AG
+/requirements/ai.txt                @TODO-AI
+/requirements/agents.txt            @TODO-AG
+/env/ai.env.part                    @TODO-AI
+/env/agents.env.part                @TODO-AG
+/scripts/prerender_audio.py         @TODO-AG

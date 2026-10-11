@@ -1,0 +1,20 @@
+import os
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    return os.getenv(name, "1" if default else "0") == "1"
+
+
+MOCK = _flag("MOCK")
+API_TOKEN = os.getenv("API_TOKEN", "change-me")
+CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
+
+# Feature flags: unfinished work merges behind a flag defaulting to off.
+FEATURE_CHAT = _flag("FEATURE_CHAT")
+FEATURE_MEMORY = _flag("FEATURE_MEMORY")
+FEATURE_PROFILE = _flag("FEATURE_PROFILE")
+FEATURE_VOICE_AGENT = _flag("FEATURE_VOICE_AGENT")
+FEATURE_ORACLE_FOREIGN = _flag("FEATURE_ORACLE_FOREIGN")
+USE_REAL_AI = _flag("USE_REAL_AI")
+USE_REAL_VOICE = _flag("USE_REAL_VOICE")
+USE_REAL_ENGINE = _flag("USE_REAL_ENGINE")

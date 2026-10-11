@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info: {title: CodeQuest AI, version: 0.1.0}
+# Frozen at T+0:45 (plan §3.1 rule 2). Additive changes only after that.
+paths:
+  /health:
+    get:
+      summary: Liveness check
+      responses:
+        "200": {description: ok}
