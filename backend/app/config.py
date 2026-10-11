@@ -9,6 +9,7 @@ MOCK = _flag("MOCK")
 API_TOKEN = os.getenv("API_TOKEN", "change-me")
 CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/codequest.db")
+SANDBOX_MODE = os.getenv("SANDBOX_MODE", "auto")  # docker | native | auto
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 
 # Feature flags: unfinished work merges behind a flag defaulting to off.

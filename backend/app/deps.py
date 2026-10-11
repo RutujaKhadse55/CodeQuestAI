@@ -3,7 +3,9 @@ from collections import defaultdict, deque
 
 from fastapi import Header, Request
 
-from . import config
+from sqlmodel import Session
+
+from . import config, db
 from .contracts.enums import ErrorCode
 from .errors import ApiError
 
@@ -28,3 +30,8 @@ def rate_limit(request: Request, x_api_token: str = Header(default="")) -> None:
     if len(q) >= config.RATE_LIMIT_PER_MIN:
         raise ApiError(ErrorCode.RATE_LIMITED, "too many requests")
     q.append(now)
+
+
+def get_session():
+    with Session(db.engine) as session:
+        yield session
