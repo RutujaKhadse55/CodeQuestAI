@@ -59,3 +59,14 @@ def test_capture_python_supported_other_language_explanation_only(client):
     assert ok["supported"] is True
     java = client.post("/problems/capture", headers=H, json=_problem("java")).json()
     assert java["supported"] is False and java["reason"] == "UNSUPPORTED_LANGUAGE"
+
+
+def test_oversized_body_rejected_before_parsing(client):
+    big = "x" * 2_100_000
+    r = client.post("/analyze", headers=H, content=big, )
+    assert r.status_code == 413 and r.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_token_compare_handles_odd_input(client):
+    assert client.get("/health", headers={"X-API-Token": ""}).status_code == 401
+    assert client.get("/health", headers={"Authorization": "Bearer  change-me "}).status_code == 200

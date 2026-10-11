@@ -12,9 +12,16 @@ BANNED_NAMES = frozenset({
     "getattr", "setattr", "delattr", "exit", "quit", "help", "memoryview",
 })
 ALLOWED_DUNDER_ATTRS = frozenset({"__init__"})
+# Frame / code / generator / traceback internals are NOT dunder but reach interpreter state
+# (e.g. gen.gi_frame.f_back.f_globals -> the harness globals -> real builtins). Rejected outright.
+BANNED_ATTRS = frozenset({
+    "gi_frame", "gi_code", "gi_yieldfrom", "gi_running", "cr_frame", "cr_code", "cr_await", "ag_frame", "ag_code",
+    "f_back", "f_globals", "f_locals", "f_builtins", "f_code", "f_trace", "tb_frame", "tb_next", "tb_lasti",
+    "func_globals", "func_code", "co_code", "co_consts", "co_names", "mro",
+})
 MAX_CODE_CHARS = 20_000
 _DUNDER = re.compile(r"^__\w+__$")
-_FORMAT_TRAVERSAL = re.compile(r"\{[^}]*__")  # "{0.__class__}".format(x)
+_FORMAT_TRAVERSAL = re.compile(r"\{[A-Za-z0-9_]*(?:[.\[]|[^}]*__)")  # "{0.__class__}" / "{0.gi_frame}" / "{0[x]}"
 
 
 class Violation(NamedTuple):
@@ -52,7 +59,9 @@ def check(code: str) -> list[Violation]:
         elif isinstance(node, ast.Attribute):
             if _DUNDER.match(node.attr) and node.attr not in ALLOWED_DUNDER_ATTRS:
                 out.append(Violation(line, "dunder_access", node.attr))
+            elif node.attr in BANNED_ATTRS:
+                out.append(Violation(line, "frame_access", node.attr))
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             if _FORMAT_TRAVERSAL.search(node.value):
-                out.append(Violation(line, "format_attribute_traversal", "dunder inside format string"))
+                out.append(Violation(line, "format_attribute_traversal", "attribute/index access inside a format string"))
     return out

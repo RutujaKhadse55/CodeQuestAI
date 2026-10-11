@@ -97,7 +97,7 @@ components:
         results: {type: array, items: {$ref: "#/components/schemas/TestResult"}}
         diagnosis: {allOf: [{$ref: "#/components/schemas/Diagnosis"}], nullable: true}
         explanation: {type: string, nullable: true}
-        flags: {type: array, items: {type: string}, description: "e.g. copy_suspected, no_reference_bundle, fuzz_budget_hit"}
+        flags: {type: array, items: {type: string}, description: "e.g. copy_suspected, hardcode_suspected, syntax_error, no_reference_bundle, fuzz_budget_hit"}
         allowed_hint_level: {type: integer, nullable: true, description: "additive (Phase 2): highest unlocked hint tier"}
     HintResult:
       type: object

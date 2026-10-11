@@ -1,13 +1,20 @@
-"""Sandbox runner: executes harness.py with a JSON payload, natively (POSIX) or in Docker.
+"""Sandbox runner: executes the harness with a JSON payload in Docker, natively (POSIX), or on a remote sandbox
+service.
 
-SANDBOX_MODE = docker | native | auto (auto: native only on POSIX with `resource`, else docker).
-Windows laptops => docker (decided in Phase 0).
+SANDBOX_MODE = docker | native | remote | auto (auto: native only on POSIX with `resource`, else docker).
+  docker : `docker run --network none ...` per call (dev laptops; Windows => docker, decided in Phase 0)
+  native : rlimit'd child process; ONLY safe inside a container that has no secrets and no egress
+  remote : POST to the sandbox service (engine/sandbox/server.py) on an internal-only network: production default.
+           The service container holds no API keys and cannot reach the internet, so even a full interpreter
+           escape finds nothing to steal and nowhere to send it.
 """
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -33,7 +40,7 @@ class SandboxUnavailable(RuntimeError):
 
 def resolve_mode() -> str:
     mode = config.SANDBOX_MODE
-    if mode in ("docker", "native"):
+    if mode in ("docker", "native", "remote"):
         return mode
     try:
         import resource  # noqa: F401
@@ -45,7 +52,7 @@ def resolve_mode() -> str:
 def run(payload: dict, total_timeout_s: float) -> list[dict]:
     """Return the harness' JSON lines (parsed). Raises SandboxUnavailable if no sandbox can start."""
     mode = resolve_mode()
-    raw = _docker(payload, total_timeout_s) if mode == "docker" else _native(payload, total_timeout_s)
+    raw = {"docker": _docker, "native": _native, "remote": _remote}[mode](payload, total_timeout_s)
     lines = []
     for ln in raw.splitlines():
         try:
@@ -60,6 +67,20 @@ def _text(b) -> str:
         return ""
     s = b.decode("utf-8", "replace") if isinstance(b, bytes) else b
     return s[:MAX_STDOUT_BYTES]
+
+
+def _remote(payload: dict, total: float) -> str:
+    """Send the payload to the sandbox service; it answers with the harness' stdout."""
+    body = json.dumps({"payload": payload, "total": total}).encode()
+    req = urllib.request.Request(config.SANDBOX_URL.rstrip("/") + "/run", data=body, method="POST",
+                                 headers={"Content-Type": "application/json", "X-Sandbox-Token": config.SANDBOX_TOKEN})
+    try:
+        with urllib.request.urlopen(req, timeout=total + STARTUP_SLACK_S) as resp:
+            return _text(json.loads(resp.read(MAX_STDOUT_BYTES * 2)).get("stdout", ""))
+    except urllib.error.HTTPError as e:
+        raise SandboxUnavailable(f"sandbox service returned HTTP {e.code}") from e
+    except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as e:
+        raise SandboxUnavailable(f"sandbox service unreachable: {type(e).__name__}") from e
 
 
 def _docker(payload: dict, total: float) -> str:

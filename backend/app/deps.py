@@ -1,3 +1,4 @@
+import hmac
 import time
 from collections import defaultdict, deque
 
@@ -24,7 +25,7 @@ def _token(x_api_token: str, authorization: str) -> str:
 
 
 def require_token(x_api_token: str = Header(default=""), authorization: str = Header(default="")) -> None:
-    if _token(x_api_token, authorization) != config.API_TOKEN:
+    if not hmac.compare_digest(_token(x_api_token, authorization).encode(), config.API_TOKEN.encode()):  # constant-time
         raise ApiError(ErrorCode.UNAUTHORIZED, "missing or invalid X-API-Token")
 
 

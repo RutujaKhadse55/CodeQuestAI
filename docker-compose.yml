@@ -1,9 +1,17 @@
-# Backend only; the extension is loaded unpacked in Chrome. Run: API_TOKEN=... docker compose up --build
+# Backend + isolated sandbox service. Run: API_TOKEN=... SANDBOX_TOKEN=... docker compose up --build
+# The extension is loaded unpacked in Chrome (not part of compose).
+#
+# Isolation model: user code ONLY ever runs in the `sandbox` container, which
+#   - sits on an `internal: true` network (no route to the internet, reachable only from `backend`),
+#   - has no API keys / env secrets, a read-only filesystem, no capabilities, small pid/memory limits,
+#   - runs each submission in an rlimit'd child process with an AST policy + restricted builtins in front.
 services:
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        EXTRAS: ${EXTRAS:-ai agents}   # add profile_rag for the LeetCode profile RAG (heavy: torch)
     ports: ["8000:8000"]
     env_file:
       - path: .env
@@ -11,11 +19,36 @@ services:
     environment:
       API_TOKEN: ${API_TOKEN:-change-me}
       MOCK: "0"
-      SANDBOX_MODE: native
+      SANDBOX_MODE: remote
+      SANDBOX_URL: http://sandbox:9000
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-sandbox-dev-token}
     volumes: ["./backend/data:/srv/data"]
+    networks: [default, sandbox_net]
+    depends_on:
+      sandbox: {condition: service_healthy}
     read_only: true
     tmpfs: ["/tmp:size=64m"]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 256
     mem_limit: 1g
+
+  sandbox:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.sandbox
+    environment:
+      SANDBOX_TOKEN: ${SANDBOX_TOKEN:-sandbox-dev-token}   # the only value it holds; not an API key
+      SANDBOX_CONCURRENCY: "3"
+    networks: [sandbox_net]
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 2
+
+networks:
+  sandbox_net:
+    internal: true   # no egress: the sandbox cannot reach the internet or the host

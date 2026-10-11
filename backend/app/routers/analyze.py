@@ -1,3 +1,4 @@
+import ast
 import re
 import secrets
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from ..errors import ApiError
 router = APIRouter()
 engine = SandboxEngine()
 MAX_EXAMPLES = 10
+HARDCODE_CONFIDENCE = 0.9
 
 
 def build_tests(problem: LCProblem, req: AnalyzeRequest, params: list[str]) -> tuple[list[dict], list[str]]:
@@ -76,8 +78,14 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
     problem = LCProblem.model_validate_json(row.payload_json)
     own = parse_signature(req.code)
     starter = parse_signature(problem.starter_python)
+    syntax_error = None
     if own.entry is None:
-        raise ApiError(ErrorCode.VALIDATION_ERROR, "no function or class Solution found in code")
+        try:
+            ast.parse(req.code)
+        except SyntaxError as e:  # a learner typo is a normal result, not an API error
+            syntax_error = f"SyntaxError: {e.msg} (line {e.lineno})"
+        else:
+            raise ApiError(ErrorCode.VALIDATION_ERROR, "no function or class Solution found in code")
     params = own.params or starter.params
     tests, flags = build_tests(problem, req, params)
     results = []
@@ -92,7 +100,10 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
     if not tests:
         flags.append("no_runnable_tests")
     try:
-        if use_fuzz:
+        if syntax_error:
+            results = [TestResult(kind="example", outcome="runtime_error", error=syntax_error)]
+            flags.append("syntax_error")
+        elif use_fuzz:
             seed = secrets.randbelow(2**31)  # fresh per attempt; stored, never shown
             results, fuzz = engine.run_and_fuzz(req.code, tests, bundle, seed)
             flags.extend(fuzz.flags)
@@ -103,6 +114,15 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
             results = engine.sandbox_run(req.code, req.code, tests)
     except SandboxUnavailable as e:
         raise ApiError(ErrorCode.UPSTREAM_FAILED, f"sandbox unavailable: {e}")
+
+    hardcode_reasons: list[str] = []
+    try:
+        hardcode_reasons = providers.hardcode_detector()(
+            req.code, [(e.input_text, e.output_text) for e in problem.examples])
+    except Exception:  # noqa: BLE001  (a broken detector must never fail an analysis)
+        hardcode_reasons = []
+    if hardcode_reasons:
+        flags.append("hardcode_suspected")
 
     examples_ok = bool(results) and all(r.outcome == "passed" for r in results if r.kind != "fuzz")
     fuzz_ok = fuzz is None or not fuzz.ran or fuzz.passed
@@ -132,7 +152,9 @@ def analyze(req: AnalyzeRequest, session: Session = Depends(get_session)):
         diagnosis = providers.diagnoser().diagnose(fuzz.vector if fuzz else "", req.problem_slug,
                                                    fuzz.divergence if fuzz else None)
         diagnosis.failure_class = diagnosis.failure_class or (fuzz.failure_class if fuzz else None)
-        if diagnosis.mistake_class is None:
+        if hardcode_reasons:  # strongest, most specific signal wins over the failure-class rule
+            diagnosis.mistake_class, diagnosis.confidence = "hardcoded_output", HARDCODE_CONFIDENCE
+        elif diagnosis.mistake_class is None:
             diagnosis.mistake_class = mistake_from_failure_class(diagnosis.failure_class)
             diagnosis.confidence = FALLBACK_CONFIDENCE if diagnosis.mistake_class else 0.0
         session.add(DiagnosisRow(

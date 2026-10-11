@@ -1,4 +1,5 @@
 """Engine Protocol implementation (Backend). Phase 1: sandbox_run. fuzz/trace arrive in Phase 2."""
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,8 +33,8 @@ class FuzzResult:
 def _canon(v: Any) -> Any:
     if isinstance(v, (list, tuple)):
         return [_canon(x) for x in v]
-    if isinstance(v, float) and v == int(v) and abs(v) < 1e15:
-        return float(v)
+    if isinstance(v, float) and math.isfinite(v) and v == int(v) and abs(v) < 1e15:
+        return float(v)  # NaN / +-inf stay as they are (int(nan) raises)
     return v
 
 

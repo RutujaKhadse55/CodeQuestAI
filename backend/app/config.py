@@ -18,7 +18,9 @@ CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
 # The extension calls through its service worker, but allow any extension origin for direct fetches.
 CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"^chrome-extension://[a-p]{32}$")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/codequest.db")
-SANDBOX_MODE = os.getenv("SANDBOX_MODE", "auto")  # docker | native | auto
+SANDBOX_MODE = os.getenv("SANDBOX_MODE", "auto")  # docker | native | remote | auto
+SANDBOX_URL = os.getenv("SANDBOX_URL", "http://sandbox:9000")
+SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "sandbox-dev-token")  # shared with the sandbox service
 DAILY_ANALYZE_CAP = int(os.getenv("DAILY_ANALYZE_CAP", "300"))  # per user per UTC day
 RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 

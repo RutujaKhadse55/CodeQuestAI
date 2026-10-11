@@ -98,3 +98,19 @@ def register_llm(fn: Callable[[str], str | None]) -> None:
 
 def llm() -> Callable[[str], str | None] | None:
     return _llm
+
+
+# ---- hardcode detector hook: AI's detector registers `detect(code, examples) -> list[str]` (reasons) ----
+_hardcode: Callable[[str, list], list[str]] | None = None
+
+
+def register_hardcode(fn: Callable[[str, list], list[str]]) -> None:
+    global _hardcode
+    _hardcode = fn
+
+
+def hardcode_detector() -> Callable[[str, list], list[str]]:
+    if _hardcode:
+        return _hardcode
+    from .engine.hardcode import detect  # Backend fallback
+    return detect
