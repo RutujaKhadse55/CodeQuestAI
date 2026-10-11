@@ -10,6 +10,8 @@ Modes (stdin JSON, "mode" key):
          Raw fuzz inputs NEVER leave the container: only counts, a 0/1 vector, a failure class and a divergence.
   both   run + verify payload merged: one container start for /analyze
   trace  {"code","reference_code","entry","args"} -> {"trace": divergence|null}
+  steps  {"code","entry","args","max_steps"} -> {"steps": {steps, result, error, truncated}}  (line-by-line variable
+         trace of the learner's entry function only; used by the Trace Analyst)
 Learner stdout/stderr is captured and discarded so it cannot forge result lines.
 """
 import builtins
@@ -208,6 +210,61 @@ def _do_trace(req, emit):
     emit({"trace": _timed(5.0, trace_compare, fl, fr, req["args"])})
 
 
+STEP_VALUE_CHARS = 120
+
+
+def _short(v):
+    try:
+        t = repr(v)
+    except Exception:  # noqa: BLE001
+        t = "<unrepr>"
+    return t if len(t) <= STEP_VALUE_CHARS else t[:STEP_VALUE_CHARS - 3] + "..."
+
+
+def _do_steps(req, emit):
+    """Record `line`/`return` events of the entry function's own frame with a snapshot of its local variables."""
+    fn = _resolve(_load(req["code"]), req["entry"])
+    code = getattr(fn, "__func__", fn).__code__
+    cap = int(req.get("max_steps", 300))
+    steps, state = [], {"root": None}
+
+    class _Cap(BaseException):
+        pass
+
+    def local(frame, event, arg):
+        if frame is not state["root"]:
+            return local
+        if event in ("line", "return"):
+            if len(steps) >= cap:
+                raise _Cap()
+            steps.append({"event": event, "line": frame.f_lineno,
+                          "variables": {k: _short(v) for k, v in frame.f_locals.items()
+                                        if k != "self" and not k.startswith("_")},
+                          "return_value": _short(arg) if event == "return" else None})
+        return local
+
+    def glob(frame, event, arg):
+        if frame.f_code is code and state["root"] is None:
+            state["root"] = frame
+            return local
+        return None
+
+    result, error, truncated = None, None, False
+    args = copy.deepcopy(req["args"])
+    sys.settrace(glob)
+    try:
+        result = _canon(_timed(5.0, lambda: fn(*args)))
+    except _Cap:
+        truncated = True
+    except _Timeout:
+        error = "TimeoutError: time limit exceeded"
+    except BaseException as e:  # noqa: BLE001
+        error = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        sys.settrace(None)
+    emit({"steps": {"steps": steps, "result": result, "error": error, "truncated": truncated}})
+
+
 def _do_run(req, emit):
     g = _load(req["code"])
     fn = _resolve(g, req.get("entry"))
@@ -246,7 +303,7 @@ def main() -> None:
             _do_run(req, emit)
             _do_verify(req, emit)
         else:
-            {"run": _do_run, "verify": _do_verify, "trace": _do_trace}[mode](req, emit)
+            {"run": _do_run, "verify": _do_verify, "trace": _do_trace, "steps": _do_steps}[mode](req, emit)
     except BaseException as e:  # noqa: BLE001
         emit({"load_error": f"{type(e).__name__}: {e}"[:500]})
 

@@ -10,6 +10,8 @@ import type {
   ChatStreamEvent,
   ConsentInfo,
   ConsentStatus,
+  CrewEnvelope,
+  ExplainProblemResponse,
   HealthResponse,
   HintResult,
   LCProblem,
@@ -158,6 +160,32 @@ export async function getExplanation(
   });
 }
 
+/** POST /tts: ElevenLabs audio via the backend; {fallback:"browser"} (no key / cap reached) means use browser speech. */
+export async function ttsSpeak(text: string, lang: string): Promise<{ audio_base64?: string | null; fallback?: string }> {
+  return learnerFetch("/tts", { method: "POST", body: JSON.stringify({ text: text.slice(0, 1500), lang }) });
+}
+
+/** POST /explain/problem: the backend fetches the problem from its LeetCode URL and explains it (optionally personalised). */
+export function explainProblem(body: Record<string, unknown>): Promise<ExplainProblemResponse> {
+  return getConfig().then(({ langPref }) => learnerFetch<ExplainProblemResponse>("/explain/problem", {
+    method: "POST",
+    body: JSON.stringify({ response_language: CREW_LANGS.includes(langPref) ? langPref : "en", ...body }),
+  }));
+}
+
+// ── AI crew (backend FEATURE_CREW): explain / generated tests / debug / trace ────────────────────────────
+
+const CREW_LANGS = ["en", "hi", "mr", "hinglish"];
+
+/** POST /crew/{agent}. The learner's language preference (incl. Hinglish) becomes the response language. */
+export async function crewCall<T>(agent: "explain" | "tests" | "debug" | "trace", body: Record<string, unknown>): Promise<CrewEnvelope<T>> {
+  const { langPref } = await getConfig();
+  return learnerFetch<CrewEnvelope<T>>(`/crew/${agent}`, {
+    method: "POST",
+    body: JSON.stringify({ response_language: CREW_LANGS.includes(langPref) ? langPref : "en", ...body }),
+  });
+}
+
 // ── chat + profile consent (backend FEATURE_CHAT) ────────────────────────────
 
 /** Text of the permission dialog shown when the chat opens. */
@@ -191,7 +219,8 @@ async function threadFor(slug: string, fresh = false): Promise<string> {
   const { langPref } = await getConfig();
   const t = await learnerFetch<{ thread_id: string }>("/chat/threads", {
     method: "POST",
-    body: JSON.stringify({ problem_slug: slug, language: langPref }),
+    // the chat service answers in en/hi/mr; Hinglish is supported by the crew endpoints only
+    body: JSON.stringify({ problem_slug: slug, language: langPref === "hinglish" ? "en" : langPref }),
   });
   await chrome.storage.local.set({ [key]: t.thread_id });
   return t.thread_id;

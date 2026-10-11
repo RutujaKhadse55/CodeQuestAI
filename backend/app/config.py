@@ -27,6 +27,8 @@ RATE_LIMIT_PER_MIN = int(os.getenv("RATE_LIMIT_PER_MIN", "60"))
 # Feature flags: unfinished work merges behind a flag defaulting to off.
 FEATURE_CHAT = _flag("FEATURE_CHAT")
 FEATURE_PROFILE_RAG = _flag("FEATURE_PROFILE_RAG")  # LeetCode profile RAG (needs requirements/profile_rag.txt)
+FEATURE_CREW = _flag("FEATURE_CREW")  # AI crew: explain / generated tests / debug / trace / LLM hints (needs GEMINI_API_KEY for the LLM parts)
+CREW_ALLOW_FIX_CODE = _flag("CREW_ALLOW_FIX_CODE")  # the Debugger may return a corrected full solution (off: product rule = no full solutions)
 FEATURE_MEMORY = _flag("FEATURE_MEMORY")
 FEATURE_PROFILE = _flag("FEATURE_PROFILE")
 FEATURE_VOICE_AGENT = _flag("FEATURE_VOICE_AGENT")

@@ -157,6 +157,16 @@ class SandboxEngine:
         return Divergence(**d) if d else None
 
 
+    def step_trace(self, code: str, entry: str, args: list, max_steps: int = 300) -> dict | None:
+        """Line-by-line variable trace of the learner's entry function in the sandbox (None if it could not run)."""
+        lines = runner.run({"mode": "steps", "code": code, "entry": entry, "args": args, "max_steps": max_steps}, 15)
+        err = next((ln["load_error"] for ln in lines if "load_error" in ln), None)
+        out = next((ln["steps"] for ln in lines if "steps" in ln), None)
+        if out is None and err:
+            return {"steps": [], "result": None, "error": err, "truncated": False}
+        return out
+
+
 def _show(v: Any) -> str:
     import json
     return json.dumps(v, separators=(",", ":"))

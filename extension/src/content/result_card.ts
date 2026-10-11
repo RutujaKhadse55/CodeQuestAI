@@ -1,7 +1,8 @@
 // ─── Result Card — Shadow DOM panel ──────────────────────────────────────────
 // Fully matches the CodeQuest reference screenshots.
 
-import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus, ChatStreamEvent } from "../api/types";
+import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus, ChatStreamEvent,
+  ExplainProblemResponse, CrewEnvelope, CrewTestReport, CrewTestCase, CrewTraceReport, CrewDebugReport, CrewExplanation } from "../api/types";
 import { renderMarkdown, stripMarkdown } from "./markdown";
 import { LOGO_DATA_URL } from "../assets/logo";
 
@@ -531,7 +532,19 @@ function mistakeLabel(cls: string | null | undefined) {
   if (!cls) return "Unknown Issue";
   return cls.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
-function playText(text: string) {
+function esc(t: unknown): string {
+  return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
+/** AI crew call through the service worker; null when the backend / FEATURE_CREW is unavailable. */
+async function crew<T>(agent: "explain" | "tests" | "debug" | "trace", body: Record<string, unknown>): Promise<CrewEnvelope<T> | null> {
+  try {
+    const r = await chrome.runtime.sendMessage({ type: "CREW", agent, body }) as (CrewEnvelope<T> & { error?: string }) | null;
+    return r && !r.error && r.result ? r : null;
+  } catch { return null; }
+}
+
+export function playText(text: string) {
   if (!text) return;
   chrome.runtime.sendMessage({ type: "PLAY_TTS", text, lang: "en" }).catch(() => {
     speechSynthesis.cancel();
@@ -560,6 +573,13 @@ export class ResultCard {
   private reviewSent = false;
   private traceIter = 1;
   private traceTotalIter = 3; // simulated steps; Phase 3: from real tracer
+  private chatSend: ((text: string) => void) | null = null;
+  private hiddenList: CrewTestCase[] | null = null;   // AI-generated (and sandbox-run) test cases; null = not loaded
+  private hiddenInfo = "";
+  private hiddenBusy = false;
+  private explainBusy = false;
+  private traceLoaded = false;
+  private explainText = "";
 
   constructor() {
     this.host = document.createElement("div");
@@ -590,15 +610,47 @@ export class ResultCard {
   /** The learner's code + editor language, used for the AI review when the code cannot be executed. */
   setReviewCode(code: string, language: string): void { this.reviewCode = code; this.reviewLang = language; this.reviewSent = false; }
 
-  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string, explanationOnly?: string): void {
+  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string, explanationOnly?: string, startTab?: string): void {
     this.response = res; this.attemptId = res.attempt_id;
     this.slug = slug; this.unsupportedLang = unsupportedLang ?? null;
     this.explanationOnly = explanationOnly ?? null;
-    this.activeTab = explanationOnly ? "chat" : "verdict"; this.traceIter = 1; // nothing ran: open the chat directly
+    this.hiddenList = null; this.hiddenInfo = ""; this.traceLoaded = false;
+    this.activeTab = startTab ?? (explanationOnly ? "chat" : "verdict"); this.traceIter = 1; // nothing ran: open the chat directly
     // estimate trace steps from iteration field
     if (res.diagnosis?.divergence?.iteration) this.traceTotalIter = Math.max(3, res.diagnosis.divergence.iteration + 1);
     this.panel.classList.add("open"); this.host.style.pointerEvents = "all";
     this.render();
+  }
+
+  /** True when the panel already holds results for this problem (so a toolbar action can just switch tabs). */
+  hasResultsFor(slug: string): boolean { return !!this.response && this.slug === slug; }
+
+  /** Switch the visible tab (no re-render). */
+  switchTab(id: string): void {
+    this.activeTab = id;
+    this.panel.classList.add("open"); this.host.style.pointerEvents = "all";
+    this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.toggle("active", (b as HTMLElement).dataset.tab === id));
+    this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${id}`));
+    if (id === "explain") void this.prefillExplain();
+    if (id === "trace") void this.loadCrewTrace();
+    if (id === "hiddentests" && !this.hiddenInfo) void this.loadHidden();
+  }
+
+  /**
+   * Toolbar entry point for Explain / Concept / Chat: open the Chat tab without running code analysis.
+   * `send` asks the question right away; otherwise `text` is only placed in the input box.
+   */
+  openChat(slug: string, text?: string, send = false): void {
+    if (!this.hasResultsFor(slug)) {
+      const idle: AnalyzeResponse = { attempt_id: 0, verified: "unverified", results: [], diagnosis: null, explanation: null, flags: [], allowed_hint_level: 1 };
+      this.showResults(idle, slug, undefined, undefined, "chat");
+    } else this.switchTab("chat");
+    if (!text) return;
+    if (send && this.chatSend) this.chatSend(text);
+    else {
+      const input = this.shadow.getElementById("cq-chat-input") as HTMLInputElement | null;
+      if (input) { input.value = text; input.focus(); }
+    }
   }
 
   close(): void { this.panel.classList.remove("open"); this.host.style.pointerEvents = "none"; stopTTS(); }
@@ -621,7 +673,7 @@ export class ResultCard {
 
   private tabs(): string {
     const t = [
-      { id: "verdict", lbl: "Debug" }, { id: "trace", lbl: "Trace" },
+      { id: "verdict", lbl: "Debug" }, { id: "explain", lbl: "Explain" }, { id: "trace", lbl: "Trace" },
       { id: "hints",   lbl: "Hints" }, { id: "hiddentests", lbl: "Hidden" },
       { id: "chat",    lbl: "Chat"  },
     ];
@@ -686,6 +738,16 @@ export class ResultCard {
         ${flagsHtml}
         <div class="expl-card">
           <div class="expl-head">
+            <div class="diag-ico-box">🤖</div>
+            <span class="diag-head-lbl">AI Debug Report</span>
+          </div>
+          <div class="expl-body" id="cq-ai-debug">
+            <button class="ht-gen-btn" id="cq-ai-debug-btn">Run AI analysis</button>
+            <span style="font-size:.7rem;color:#9ca3af;margin-left:6px;">Root cause and fix steps in words. No full solution.</span>
+          </div>
+        </div>
+        <div class="expl-card">
+          <div class="expl-head">
             <div class="diag-ico-box">📝</div>
             <span class="diag-head-lbl">Explanation</span>
           </div>
@@ -746,7 +808,9 @@ export class ResultCard {
         <span class="sec-title">Variable Trace</span>
         <button class="listen-btn" id="cq-speak-trace">🔊 Listen</button>
       </div>
-      <div class="trace-outer">${darkCard}</div>
+      <div class="trace-outer">${darkCard}
+        <div id="cq-crew-trace" class="expl-card" style="margin-top:10px;"><div class="expl-body" style="color:#9ca3af">Open this tab to record a real step-by-step execution trace…</div></div>
+      </div>
     </div>`;
   }
 
@@ -808,39 +872,214 @@ export class ResultCard {
     </div>`;
   }
 
+  // ── Explain tab: problem URL + LeetCode username -> the backend fetches the problem and explains it ──────
+
+  private explainTab(): string {
+    return `<div class="cq-tab-panel${this.activeTab === "explain" ? " active" : ""}" id="tab-explain">
+      <div class="sec-head">
+        <span class="sec-title">Explain Problem</span>
+        <button class="listen-btn" id="cq-speak-explain">🔊 Listen</button>
+      </div>
+      <div class="hidden-outer">
+        <div class="ht-intro-card" style="flex-direction:column;align-items:stretch;gap:6px;">
+          <label style="font-size:.7rem;font-weight:600;color:#6b7280">Problem link</label>
+          <input class="chat-input" id="cq-ex-url" type="text" placeholder="https://leetcode.com/problems/two-sum/" style="width:100%;box-sizing:border-box" />
+          <label style="font-size:.7rem;font-weight:600;color:#6b7280">LeetCode username (optional, personalises the explanation)</label>
+          <input class="chat-input" id="cq-ex-user" type="text" placeholder="your public LeetCode username" style="width:100%;box-sizing:border-box" />
+          <div style="font-size:.66rem;color:#9ca3af">Entering a username lets CodeQuest read your PUBLIC LeetCode profile (solved counts, languages). Leave it empty to skip. You can withdraw this from Chat → Profile access.</div>
+          <button class="ht-gen-btn" id="cq-ex-run">📖 Explain this problem</button>
+        </div>
+        <div id="cq-ex-out"><div class="cq-empty">Paste a problem link (the current page is filled in) and press Explain.</div></div>
+      </div>
+    </div>`;
+  }
+
+  private problemUrl(): string {
+    const m = location.pathname.match(/\/problems\/([^/?#]+)/);
+    return m ? `https://leetcode.com/problems/${m[1]}/` : "";
+  }
+
+  /** Fill the inputs once: current page URL and the username already authorised (if any). */
+  private async prefillExplain(): Promise<void> {
+    const url = this.shadow.getElementById("cq-ex-url") as HTMLInputElement | null;
+    const user = this.shadow.getElementById("cq-ex-user") as HTMLInputElement | null;
+    if (url && !url.value) url.value = this.problemUrl();
+    if (user && !user.value) {
+      try {
+        const st = await chrome.runtime.sendMessage({ type: "CHAT_STATUS" }) as { granted?: boolean; leetcode_username?: string | null } | null;
+        if (st?.granted && st.leetcode_username) user.value = st.leetcode_username;
+      } catch { /* offline: leave empty */ }
+    }
+  }
+
+  /** Run the explanation. `selected` = text the learner highlighted on the page (explained first). */
+  private async runExplain(selected?: string): Promise<void> {
+    const out = this.shadow.getElementById("cq-ex-out");
+    const btn = this.shadow.getElementById("cq-ex-run") as HTMLButtonElement | null;
+    const url = (this.shadow.getElementById("cq-ex-url") as HTMLInputElement | null)?.value.trim() ?? "";
+    const username = (this.shadow.getElementById("cq-ex-user") as HTMLInputElement | null)?.value.trim() ?? "";
+    if (!out || this.explainBusy) return;
+    if (!url) { out.innerHTML = `<div class="cq-error">Enter a LeetCode problem link first.</div>`; return; }
+    this.explainBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Fetching the problem…"; }
+    out.innerHTML = `<div class="cq-loading" style="height:140px"><div class="cq-spinner"></div><span>Fetching the problem and preparing the explanation…</span></div>`;
+    let r: (ExplainProblemResponse & { error?: string }) | null = null;
+    try { r = await chrome.runtime.sendMessage({ type: "EXPLAIN_PROBLEM", body: { url, username: username || undefined, selected_text: selected || undefined, code: this.reviewCode || undefined, language: this.reviewLang || undefined } }); } catch { r = null; }
+    this.explainBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = "📖 Explain this problem"; }
+    if (!r || r.error || !r.explanation) {
+      const why = r?.error ? esc(r.error.replace(/^\d+ [^:]*:\s*/, "").slice(0, 220)) : "backend unreachable";
+      out.innerHTML = `<div class="cq-error"><strong>Could not explain the problem</strong><br><small>${why}</small></div>`;
+      return;
+    }
+    const e = r.explanation, p = r.problem;
+    const list = (a: string[]) => a.length ? `<ul style="margin:4px 0 0 16px;padding:0">${a.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+    const sec = (title: string, body: string) => body.trim() ? `<div style="margin-top:8px"><b>${title}</b><div>${body}</div></div>` : "";
+    this.explainText = [e.what_is_asked, e.input_meaning, e.output_meaning, ...e.constraints_and_conditions].filter(Boolean).join(". ");
+    out.innerHTML = `<div class="expl-card">
+      <div class="expl-head"><div class="diag-ico-box">📖</div><span class="diag-head-lbl">${esc(p.title)} · ${esc(p.difficulty)}</span></div>
+      <div class="expl-body">
+        <div style="font-size:.7rem;color:#6b7280">${p.tags.map(esc).join(" · ")}</div>
+        ${selected ? `<div style="margin-top:6px;font-size:.72rem;background:#fffbeb;border-radius:6px;padding:6px">You highlighted: “${esc(selected.slice(0, 200))}”</div>` : ""}
+        ${sec("What it asks", esc(e.what_is_asked))}
+        ${sec("Input", esc(e.input_meaning))}
+        ${sec("Output", esc(e.output_meaning))}
+        ${sec("Constraints", list(e.constraints_and_conditions))}
+        ${sec("Examples", list(e.examples_walkthrough))}
+        ${sec("Your code", e.code_relation ? esc(e.code_relation) + (e.code_solves_problem !== "unclear" ? ` <i>(solves it: ${e.code_solves_problem})</i>` : "") : "")}
+        ${sec("Mismatches", list(e.mismatches))}
+        <div style="font-size:.66rem;color:#9ca3af;margin-top:10px">${r.source === "fetched" ? "Problem fetched from LeetCode." : "Using the copy captured earlier (LeetCode unreachable)."}
+          ${r.personalised ? ` Personalised for ${esc(r.username ?? "you")}.` : ""}${r.llm_used ? "" : " AI model unavailable: showing the problem's own text."}
+          ${r.notes.map((n) => " " + esc(n)).join("")}</div>
+      </div></div>`;
+  }
+
+  /** Toolbar "Explain": open this tab, fill in the page URL and run immediately. */
+  openExplain(selected?: string): void {
+    const slug = location.pathname.match(/\/problems\/([^/?#]+)/)?.[1] ?? "";
+    if (!this.response) {
+      const idle: AnalyzeResponse = { attempt_id: 0, verified: "unverified", results: [], diagnosis: null, explanation: null, flags: [], allowed_hint_level: 1 };
+      this.showResults(idle, slug, undefined, undefined, "explain");
+    } else this.switchTab("explain");
+    void this.prefillExplain().then(() => this.runExplain(selected));
+  }
+
   // ── Hidden Tests tab ─────────────────────────────────────────────────────────
 
   private hiddenTab(): string {
     return `<div class="cq-tab-panel${this.activeTab === "hiddentests" ? " active" : ""}" id="tab-hiddentests">
       <div class="sec-head">
-        <span class="sec-title">Hidden Test Cases</span>
+        <span class="sec-title">Generated Test Cases</span>
         <button class="listen-btn" id="cq-speak-hidden">🔊 Listen</button>
       </div>
       <div class="hidden-outer">
         <div class="ht-intro-card">
-          <div class="ht-intro-text">These test cases go beyond the examples — they test your code against <strong>rigorous edge conditions and constraint boundaries</strong> that a naive solution will fail. Your implementation must handle all of them correctly.</div>
+          <div class="ht-intro-text" id="cq-hidden-info">AI-generated edge cases and boundaries, run against <strong>your code</strong> in the secure sandbox. These are generated tests, not LeetCode's official hidden tests.</div>
           <button class="ht-gen-btn" id="cq-gen-hidden">⚡ Regenerate</button>
         </div>
         <div id="cq-hidden-results">
-          ${this.buildTestCards(this.slug)}
+          <div class="cq-empty">Open this tab to generate test cases…</div>
         </div>
       </div>
     </div>`;
   }
 
-  private buildTestCards(slug: string): string {
-    const cases = this.hiddenCases(slug);
-    return cases.map((tc, i) => `
+  /** The cases currently shown (AI-generated if loaded, else the static fallback set). */
+  private shownCases(): { input: string; expected: string; status?: string; actual?: string; reason?: string }[] {
+    return this.hiddenList
+      ? this.hiddenList.map((c) => ({ input: c.input, expected: c.expected_output, status: c.status, actual: c.actual_output, reason: c.reason }))
+      : this.hiddenCases(this.slug);
+  }
+
+  private buildTestCards(): string {
+    return this.shownCases().map((tc, i) => `
       <div class="tc-card">
         <div class="tc-head">
-          <span class="tc-head-lbl">Test Case ${i + 1}</span>
-          <button class="tc-copy-btn" data-copy="${tc.input}" title="Copy input">⧉</button>
+          <span class="tc-head-lbl">Test Case ${i + 1}${tc.status ? ` · <span style="color:${tc.status === "PASS" ? "#16a34a" : tc.status === "FAIL" ? "#dc2626" : "#9ca3af"}">${tc.status === "NOT_RUN" ? "NOT RUN" : tc.status}</span>` : ""}</span>
+          <button class="tc-copy-btn" data-copy="${esc(tc.input)}" title="Copy input">⧉</button>
         </div>
         <div class="tc-body">
-          <div><span class="tc-in">Input: </span><span class="tc-val">${tc.input}</span></div>
-          <div><span class="tc-out">Expected: </span><span class="tc-val">${tc.expected}</span></div>
+          <div><span class="tc-in">Input: </span><span class="tc-val">${esc(tc.input)}</span></div>
+          <div><span class="tc-out">Expected: </span><span class="tc-val">${esc(tc.expected)}</span></div>
+          ${tc.actual ? `<div><span class="tc-out">Your output: </span><span class="tc-val">${esc(tc.actual)}</span></div>` : ""}
+          ${tc.reason ? `<div style="font-size:.7rem;color:#9ca3af">${esc(tc.reason)}</div>` : ""}
         </div>
       </div>`).join("");
+  }
+
+  private wireCopyButtons(): void {
+    this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        navigator.clipboard.writeText((btn as HTMLElement).dataset.copy ?? "").catch(() => {});
+        (btn as HTMLElement).textContent = "✓";
+        setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
+      });
+    });
+  }
+
+  /** Test Case Generator agent: model-written cases, executed in the backend sandbox. Falls back to the static set. */
+  private async loadHidden(): Promise<void> {
+    const out = this.shadow.getElementById("cq-hidden-results");
+    const info = this.shadow.getElementById("cq-hidden-info");
+    const btn = this.shadow.getElementById("cq-gen-hidden") as HTMLButtonElement | null;
+    if (!out || this.hiddenBusy) return;
+    this.hiddenBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = "⏳ Generating…"; }
+    out.innerHTML = `<div class="cq-loading" style="height:120px"><div class="cq-spinner"></div><span>Generating and running test cases…</span></div>`;
+    const r = await crew<CrewTestReport>("tests", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
+    this.hiddenBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = "⚡ Regenerate"; }
+    if (r && r.result.test_cases.length) {
+      this.hiddenList = r.result.test_cases;
+      const rep = r.result;
+      const extra = [...rep.failure_analysis.map((t) => `• ${esc(t)}`), ...rep.required_fixes.map((t) => `→ ${esc(t)}`)].join("<br>");
+      this.hiddenInfo = `${esc(rep.disclaimer)}${r.executed ? " Run in the secure sandbox against your code." : " Not executed" + (r.notes[0] ? `: ${esc(r.notes[0])}` : ".")}${r.llm_used ? "" : " (AI model unavailable: using the problem's examples.)"}${extra ? `<div style="margin-top:6px">${extra}</div>` : ""}`;
+    } else {
+      this.hiddenList = null;
+      this.hiddenInfo = "Could not reach the AI test generator (is FEATURE_CREW=1 set on the backend?). Showing a basic edge-case set.";
+    }
+    if (info) info.innerHTML = this.hiddenInfo;
+    out.innerHTML = this.buildTestCards();
+    this.wireCopyButtons();
+    if (!this.hiddenList) this.hiddenList = null; // static fallback stays re-generatable
+  }
+
+  /** Trace Analyst agent: real execution steps from the sandbox + the model's explanation of where it goes wrong. */
+  private async loadCrewTrace(): Promise<void> {
+    const box = this.shadow.getElementById("cq-crew-trace");
+    if (!box || this.traceLoaded || !this.slug) return;
+    this.traceLoaded = true;
+    box.innerHTML = `<div class="expl-body" style="color:#9ca3af">Recording execution trace…</div>`;
+    const r = await crew<CrewTraceReport>("trace", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
+    if (!r) { this.traceLoaded = false; box.innerHTML = `<div class="expl-body" style="color:#9ca3af">Execution trace is unavailable (backend FEATURE_CREW off or offline).</div>`; return; }
+    const t = r.result;
+    const rows = t.steps.slice(0, 60).map((s) => `<tr${t.divergence_step === s.step ? ' style="background:#fef3c7"' : ""}><td>${s.step}</td><td><code>${esc(s.statement)}</code></td><td style="font-size:.7rem">${esc(s.variables)}</td></tr>`).join("");
+    box.innerHTML = `<div class="expl-head"><div class="diag-ico-box">🧭</div><span class="diag-head-lbl">Execution Trace · ${t.trace_source === "actual_runtime" ? "real run" : "AI simulation"}</span></div>
+      <div class="expl-body">
+        <div style="font-size:.72rem;color:#6b7280;margin-bottom:6px">${esc(t.note)}</div>
+        ${t.failure_explanation ? `<div style="margin-bottom:8px">${esc(t.failure_explanation)}</div>` : ""}
+        ${rows ? `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.74rem;width:100%"><tr><th>#</th><th>Statement</th><th>Variables</th></tr>${rows}</table></div>` : ""}
+        ${t.steps.length > 60 ? `<div style="font-size:.7rem;color:#9ca3af">Showing 60 of ${t.steps.length} steps.</div>` : ""}
+      </div>`;
+  }
+
+  /** Debugger agent: root cause and fix steps in words (the corrected full solution is withheld by the backend). */
+  private async runAiDebug(): Promise<void> {
+    const box = this.shadow.getElementById("cq-ai-debug");
+    if (!box) return;
+    box.innerHTML = `<span style="color:#9ca3af">Analysing your code…</span>`;
+    const r = await crew<CrewDebugReport>("debug", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined, attempt_id: this.attemptId || undefined });
+    if (!r) { box.innerHTML = `<span style="color:#9ca3af">AI analysis is unavailable (backend FEATURE_CREW off or offline).</span>`; return; }
+    const d = r.result;
+    const li = (arr: string[]) => arr.length ? `<ul style="margin:4px 0 0 16px;padding:0">${arr.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+    box.innerHTML = `<div style="font-weight:700">${esc(d.diagnosis)}</div>
+      ${d.bug_types.length ? `<div style="font-size:.7rem;color:#92400e">${d.bug_types.map(esc).join(" · ")}</div>` : ""}
+      ${d.root_cause ? `<div style="margin-top:6px"><b>Root cause:</b> ${esc(d.root_cause)}</div>` : ""}
+      ${d.expected_vs_actual ? `<div style="margin-top:4px"><b>Expected vs actual:</b> ${esc(d.expected_vs_actual)}</div>` : ""}
+      ${d.variable_trace_of_bug ? `<div style="margin-top:4px"><b>Where it goes wrong:</b> ${esc(d.variable_trace_of_bug)}</div>` : ""}
+      ${d.changes_and_reasons.length ? `<div style="margin-top:6px"><b>What to change:</b>${li(d.changes_and_reasons)}</div>` : ""}
+      ${d.corrected_code ? `<pre style="white-space:pre-wrap;font-size:.72rem;background:#f9fafb;padding:8px;border-radius:8px;margin-top:6px">${esc(d.corrected_code)}</pre>` : ""}
+      <div style="font-size:.68rem;color:#9ca3af;margin-top:6px">${r.llm_used ? "" : "AI model unavailable: showing the stored diagnosis. "}${r.executed ? "Checked against the examples in the sandbox." : "Code was not executed."}${r.fix_code_withheld ? " Full solution intentionally not shown." : ""}</div>`;
   }
 
   private hiddenCases(slug: string): { input: string; expected: string }[] {
@@ -919,6 +1158,7 @@ export class ResultCard {
       ${this.tabs()}
       <div class="cq-body">
         ${this.debugTab(res)}
+        ${this.explainTab()}
         ${this.traceTab(res)}
         ${this.hintsTab(res)}
         ${this.hiddenTab()}
@@ -936,14 +1176,7 @@ export class ResultCard {
 
     // Tabs
     this.shadow.querySelectorAll(".cq-tab").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = (btn as HTMLElement).dataset.tab ?? "verdict";
-        this.activeTab = id;
-        this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.remove("active"));
-        this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.remove("active"));
-        btn.classList.add("active");
-        this.shadow.getElementById(`tab-${id}`)?.classList.add("active");
-      });
+      btn.addEventListener("click", () => this.switchTab((btn as HTMLElement).dataset.tab ?? "verdict"));
     });
 
     // 🔊 Listen buttons
@@ -966,9 +1199,12 @@ export class ResultCard {
       if (txts.length) playText(txts.join(". "));
     });
     this.shadow.getElementById("cq-speak-hidden")?.addEventListener("click", () => {
-      const cases = this.hiddenCases(this.slug);
+      const cases = this.shownCases();
       playText(cases.map((c, i) => `Test ${i + 1}: Input ${c.input}. Expected ${c.expected}.`).join(" "));
     });
+    this.shadow.getElementById("cq-ex-run")?.addEventListener("click", () => { void this.runExplain(); });
+    this.shadow.getElementById("cq-speak-explain")?.addEventListener("click", () => playText(this.explainText));
+    this.shadow.getElementById("cq-ai-debug-btn")?.addEventListener("click", () => { void this.runAiDebug(); });
 
     // Trace nav
     this.shadow.getElementById("cq-trace-prev")?.addEventListener("click", () => {
@@ -992,36 +1228,10 @@ export class ResultCard {
         .catch(() => { el.textContent = "Could not load hint."; });
     }
 
-    // Hidden test copy buttons
-    this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const text = (btn as HTMLElement).dataset.copy ?? "";
-        navigator.clipboard.writeText(text).catch(() => {});
-        (btn as HTMLElement).textContent = "✓";
-        setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
-      });
-    });
-
-    // Hidden regenerate
-    const genBtn = this.shadow.getElementById("cq-gen-hidden") as HTMLButtonElement | null;
-    const hiddenResults = this.shadow.getElementById("cq-hidden-results");
-    genBtn?.addEventListener("click", () => {
-      if (!genBtn || !hiddenResults) return;
-      genBtn.disabled = true; genBtn.textContent = "⏳ Generating…";
-      setTimeout(() => {
-        hiddenResults.innerHTML = this.buildTestCards(this.slug);
-        // Re-attach copy buttons
-        this.shadow.querySelectorAll(".tc-copy-btn").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const text = (btn as HTMLElement).dataset.copy ?? "";
-            navigator.clipboard.writeText(text).catch(() => {});
-            (btn as HTMLElement).textContent = "✓";
-            setTimeout(() => { (btn as HTMLElement).textContent = "⧉"; }, 1200);
-          });
-        });
-        genBtn.textContent = "⚡ Regenerate"; genBtn.disabled = false;
-      }, 900);
-    });
+    // Generated tests: copy buttons are wired after each (re)render of the list
+    this.shadow.getElementById("cq-gen-hidden")?.addEventListener("click", () => { this.hiddenList = null; void this.loadHidden(); });
+    if (this.activeTab === "hiddentests") void this.loadHidden();
+    if (this.activeTab === "trace") void this.loadCrewTrace();
 
     // Chat
     this.attachChat(res);
@@ -1175,6 +1385,7 @@ export class ResultCard {
       playText(stripMarkdown(r.content));
     };
 
+    this.chatSend = (t: string) => { void send(t); };
     const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ""; send(t); };
     sendBtn.addEventListener("click", submit);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
@@ -1230,8 +1441,18 @@ export class ResultCard {
       } else consentCard();
     });
 
-    this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", () => {
-      send("Explain this problem to me in simple words.");
+    this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", async () => {
+      addBubble("Explain this problem to me in simple words.", true); showTyping();
+      const r = await crew<CrewExplanation>("explain", { problem_slug: this.slug, code: this.reviewCode || undefined, language: this.reviewLang || undefined });
+      hideTyping();
+      if (!r || !r.llm_used) { await send("Explain this problem to me in simple words.", false); return; } // chat service answers instead
+      const e = r.result;
+      const md = [`**What it asks:** ${e.what_is_asked}`, e.input_meaning && `**Input:** ${e.input_meaning}`, e.output_meaning && `**Output:** ${e.output_meaning}`,
+        e.constraints_and_conditions.length && `**Constraints:**\n${e.constraints_and_conditions.map((c) => `- ${c}`).join("\n")}`,
+        e.examples_walkthrough.length && `**Examples:**\n${e.examples_walkthrough.map((c) => `- ${c}`).join("\n")}`,
+        e.code_relation && `**Your code:** ${e.code_relation}${e.code_solves_problem !== "unclear" ? ` (solves the problem: ${e.code_solves_problem})` : ""}`,
+        e.mismatches.length && `**Mismatches:**\n${e.mismatches.map((c) => `- ${c}`).join("\n")}`].filter(Boolean).join("\n\n");
+      const b = addBubble(md, false); b.dataset.raw = md;
     });
 
     const reviewNow = () => {
@@ -1250,16 +1471,14 @@ export class ResultCard {
       this.shadow.getElementById("tab-verdict")?.classList.add("active");
     });
 
-    this.shadow.getElementById("cq-cab-tests")?.addEventListener("click", () => {
+    this.shadow.getElementById("cq-cab-tests")?.addEventListener("click", async () => {
       addBubble("Generate test cases for this problem", true); showTyping();
-      setTimeout(() => {
-        hideTyping();
-        const cases = this.hiddenCases(this.slug);
-        const reply = `Here are ${cases.length} test cases:\n` +
-          cases.map((c, i) => `${i + 1}. ${c.input} → ${c.expected}`).join("\n");
-        addBubble(reply, false);
-        playText(`I generated ${cases.length} test cases. Check the Hidden tab for the full formatted list.`);
-      }, 800);
+      if (!this.hiddenList) await this.loadHidden();
+      hideTyping();
+      const cases = this.shownCases();
+      const reply = `Here are ${cases.length} test cases (open the Hidden tab for details):\n` +
+        cases.map((c, i) => `${i + 1}. ${c.input} → ${c.expected}${c.status ? ` (${c.status})` : ""}`).join("\n");
+      addBubble(reply, false);
     });
   }
 

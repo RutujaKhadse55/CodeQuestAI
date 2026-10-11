@@ -5,7 +5,7 @@
 
 import {
   checkHealth, captureProblem, analyzeProblem, getHint, getDashboard, getExplanation,
-  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend, chatSendStream,
+  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend, chatSendStream, crewCall, ttsSpeak, explainProblem,
 } from "../api/client";
 import type { LCProblem, AnalyzeRequest } from "../api/types";
 
@@ -22,6 +22,8 @@ type SWMessage =
   | { type: "CHAT_STATUS" }
   | { type: "CHAT_GRANT"; username: string }
   | { type: "CHAT_REVOKE" }
+  | { type: "EXPLAIN_PROBLEM"; body: Record<string, unknown> }
+  | { type: "CREW"; agent: "explain" | "tests" | "debug" | "trace"; body: Record<string, unknown> }
   | { type: "CHAT_SEND"; slug: string; text: string; code?: string; codeLanguage?: string }
   | { type: "GET_MONACO_SELECTION" }
   | { type: "GET_FULL_CODE" }
@@ -91,6 +93,11 @@ async function handleMessage(
       return chatGrantConsent(msg.username);
     case "CHAT_REVOKE":
       return chatRevokeConsent();
+    // ── AI crew: explain / generated tests / debug / trace ───────────────────
+    case "EXPLAIN_PROBLEM":
+      return explainProblem(msg.body);
+    case "CREW":
+      return crewCall(msg.agent, msg.body);
     case "CHAT_SEND":
       return chatSend(msg.slug, msg.text, { code: msg.code, codeLanguage: msg.codeLanguage });
 
@@ -121,7 +128,12 @@ async function handleMessage(
     // ── Audio: play TTS via offscreen document ───────────────────────────────
     case "PLAY_TTS": {
       await ensureOffscreenDocument();
-      await chrome.runtime.sendMessage({ type: "PLAY_TTS", text: msg.text, lang: msg.lang });
+      let audioBase64: string | undefined;
+      try {
+        const r = await ttsSpeak(msg.text, msg.lang ?? "en");
+        audioBase64 = r.audio_base64 || undefined; // undefined => offscreen uses browser speech
+      } catch { /* backend offline: browser speech */ }
+      await chrome.runtime.sendMessage({ type: "PLAY_TTS", text: msg.text, lang: msg.lang, audioBase64 });
       return { ok: true };
     }
 

@@ -4,6 +4,10 @@ import os
 import tempfile
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")  # before any app import
+os.environ["GEMINI_API_KEY"] = ""  # tests never call the real model (the repo .env may hold a key); fake the LLM via providers.register_llm
+os.environ["ELEVENLABS_API_KEY"] = ""
+for _f in ("FEATURE_CREW", "USE_REAL_AI", "CREW_ALLOW_FIX_CODE"):  # flags are set per test, never by the developer .env
+    os.environ[_f] = "0"
 os.environ.setdefault("PROFILE_SNAPSHOT_DIR", tempfile.mkdtemp(prefix="cq_profiles_"))
 
 import pytest

@@ -1,0 +1,125 @@
+
+explain_problem_task:
+  description: |
+    Problem statement:
+    {problem_statement}
+
+    Complete user code:
+    {user_code}
+
+    Response language: {response_language}
+
+    Explain:
+    1. What the problem asks.
+    2. Input and output meaning.
+    3. Constraints and conditions.
+    4. Each supplied example step by step.
+    5. How the user's code works.
+    6. Whether the code solves the problem and where it mismatches.
+  expected_output: >
+    A structured problem explanation matching the ProblemExplanation schema.
+
+generate_tests_task:
+  description: |
+    Problem:
+    {problem_statement}
+
+    Constraints:
+    {constraints}
+
+    Complete code:
+    {user_code}
+
+    Call expression template:
+    {call_template}
+
+    Response language: {response_language}
+
+    Generate normal, boundary, minimum, maximum and special test cases.
+    Use the code runner to compare outputs when possible.
+    Mark unavailable execution as NOT_RUN. Explain failures and fixes.
+    These are generated tests, never official hidden tests.
+  expected_output: >
+    A structured test report matching the TestCaseReport schema.
+
+debug_code_task:
+  description: |
+    Problem:
+    {problem_statement}
+
+    Complete code:
+    {user_code}
+
+    Selected snippet:
+    {selected_code}
+
+    Response language: {response_language}
+
+    Follow this order:
+    1. Diagnosis.
+    2. Root cause.
+    3. Corrected complete code.
+    4. Trace of corrected code.
+    5. Changes and reasons.
+
+    Use tools to verify when possible. Do not claim unverified execution.
+  expected_output: >
+    A structured debugging report matching the DebugReport schema.
+
+trace_execution_task:
+  description: |
+    Problem:
+    {problem_statement}
+
+    Complete code:
+    {user_code}
+
+    Call expression:
+    {call_expr}
+
+    Debug output:
+    {debug_output}
+
+    Previous trace:
+    {previous_trace}
+
+    Expected output:
+    {expected_output_value}
+
+    Response language: {response_language}
+
+    Trace variables, conditions, loops, calls, returns and state changes.
+    Identify the first divergence from expected behavior.
+    Use actual_runtime only when the execution tracer returns a real trace.
+    Otherwise use static_simulation and clearly state it is not runtime output.
+  expected_output: >
+    A structured trace matching the TraceReport schema.
+
+hint_task:
+  description: |
+    Problem:
+    {problem_statement}
+
+    Constraints:
+    {constraints}
+
+    User code:
+    {user_code}
+
+    Previously unlocked hints:
+    {previous_hints}
+
+    Requested hint level: {hint_level} out of 5.
+    Response language: {response_language}
+
+    Give exactly ONE hint for this level:
+    1 = gentle observation
+    2 = data structure or technique
+    3 = algorithm in words
+    4 = pseudocode and complexity
+    5 = near-complete guidance without full code
+
+    Do not repeat or contradict earlier hints.
+    Include relevant topics, trade-offs, complexity insight and next-step guidance.
+  expected_output: >
+    A structured hint matching the HintResult schema.

@@ -7,7 +7,7 @@ import "./options.css";
 interface Settings {
   backendUrl: string;
   token: string;
-  langPref: "en" | "hi" | "mr";
+  langPref: "en" | "hi" | "mr" | "hinglish";
 }
 
 function OptionsApp() {
@@ -97,6 +97,7 @@ function OptionsApp() {
           <option value="en">{t("lang.en")}</option>
           <option value="hi">{t("lang.hi")}</option>
           <option value="mr">{t("lang.mr")}</option>
+          <option value="hinglish">Hinglish</option>
         </select>
 
         <div className="actions">

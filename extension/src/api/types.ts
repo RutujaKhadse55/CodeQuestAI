@@ -160,3 +160,78 @@ export type ChatStreamEvent =
   | { event: "done"; data: { message_id: number; guard: ChatReply["guard"]; sources: string[]; allowed_hint_level?: number | null } }
   | { event: "error"; data: { message: string } }
   | { event: "end"; data?: undefined };
+
+// ── AI crew (POST /crew/{explain|tests|debug|trace}, backend FEATURE_CREW) ───────────────────────────────
+
+export interface CrewEnvelope<T> {
+  agent: string;
+  result: T;
+  llm_used: boolean;
+  executed: boolean;
+  notes: string[];
+  fix_code_withheld?: boolean;
+}
+
+export interface CrewTestCase {
+  category: string;
+  input: string;
+  expected_output: string;
+  reason: string;
+  actual_output: string;
+  status: "PASS" | "FAIL" | "NOT_RUN";
+}
+
+export interface CrewTestReport {
+  disclaimer: string;
+  test_cases: CrewTestCase[];
+  failure_analysis: string[];
+  required_fixes: string[];
+}
+
+export interface CrewTraceStep {
+  step: number;
+  statement: string;
+  variables: string;
+  condition_result: string;
+  observed_vs_expected: string;
+}
+
+export interface CrewTraceReport {
+  trace_source: "actual_runtime" | "static_simulation";
+  note: string;
+  steps: CrewTraceStep[];
+  divergence_step: number | null;
+  failure_explanation: string;
+}
+
+export interface CrewDebugReport {
+  diagnosis: string;
+  bug_types: string[];
+  variable_trace_of_bug: string;
+  root_cause: string;
+  expected_vs_actual: string;
+  corrected_code: string;
+  corrected_code_trace: string;
+  changes_and_reasons: string[];
+}
+
+export interface CrewExplanation {
+  what_is_asked: string;
+  input_meaning: string;
+  output_meaning: string;
+  constraints_and_conditions: string[];
+  examples_walkthrough: string[];
+  code_relation: string;
+  code_solves_problem: "yes" | "no" | "partially" | "unclear";
+  mismatches: string[];
+}
+
+export interface ExplainProblemResponse {
+  problem: { slug: string; title: string; difficulty: string; tags: string[]; url: string };
+  explanation: CrewExplanation;
+  llm_used: boolean;
+  source: "fetched" | "stored";
+  personalised: boolean;
+  username: string | null;
+  notes: string[];
+}
