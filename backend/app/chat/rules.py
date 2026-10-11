@@ -120,3 +120,9 @@ def concept_reply(concept: dict | None) -> str:
         return concept["data"]["explanation"]
     return ("I can't explain that concept right now because no language model is available. "
             "Ask about this problem's statement, your attempt, or request a hint.")
+
+
+def review_unavailable(code_language: str | None) -> str:
+    lang = (code_language or "your").strip()
+    return (f"I can only run Python 3, and no AI model is available right now, so I can't review your {lang} code. "
+            "I can still explain the problem, give hints, or answer questions about it.")

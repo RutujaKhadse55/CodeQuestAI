@@ -10,6 +10,8 @@ import type { LCProblem, AnalyzeRequest, AnalyzeResponse, CaptureResponse } from
 import { totalPasteChars, pageLoadTime } from "./toolbar";
 
 export interface OrchestrationResult {
+  /** Set when the code cannot be executed (language / problem type): the card opens in chat-only mode. */
+  explanationOnly?: string;
   capture: CaptureResponse;
   analysis: AnalyzeResponse;
   problem: LCProblem;
@@ -190,8 +192,16 @@ function getRunPanelCapture(): {
   };
 }
 
+/** LeetCode's language label -> our id ("Python3" -> python3, "C++" -> cpp, "C#" -> csharp). */
+export function normalizeLang(label: string): string {
+  const t = label.toLowerCase().replace(/\s+/g, "");
+  if (t === "python3" || t === "python" || t === "py3") return "python3";
+  if (t === "c++") return "cpp";
+  if (t === "c#") return "csharp";
+  return t.replace(/[^a-z0-9]/g, "") || "python3";
+}
+
 async function getCurrentLanguage(): Promise<string> {
-  // Try the language selector button text
   const langSelectors = [
     "[data-cy='lang-select'] button",
     ".ant-select-selection-item",
@@ -200,17 +210,24 @@ async function getCurrentLanguage(): Promise<string> {
     "button[class*='lang']",
   ];
   const langText = selectText(langSelectors);
-  if (langText) {
-    const normalized = langText.toLowerCase()
-      .replace("c++", "cpp")
-      .replace("python3", "python3")
-      .replace("python", "python3")
-      .replace(/\s/g, "");
-    if (normalized) return normalized;
-  }
-  // Fallback via SW Monaco bridge
+  if (langText) return normalizeLang(langText);
+  // Fallback via the page-world Monaco bridge (Monaco ids: python, java, cpp, javascript, ...)
   const codeResult = await fetchFullCode();
-  return codeResult?.language ?? "python3";
+  return codeResult?.language ? normalizeLang(codeResult.language) : "python3";
+}
+
+/** What the result card shows when nothing could be executed. */
+function chatOnlyAnalysis(reason: string): AnalyzeResponse {
+  return { attempt_id: 0, verified: "unverified", results: [], diagnosis: null, explanation: null,
+           flags: ["explanation_only", reason], allowed_hint_level: 1 };
+}
+
+function explanationOnlyMessage(reason: string | null | undefined, lang: string): string {
+  if (reason && reason.startsWith("UNSUPPORTED_LANGUAGE"))
+    return `Only Python 3 code can be executed (your editor is set to ${lang}), so there are no test results. The AI reviews your ${lang} code in the chat instead; switch to Python3 for full debugging.`;
+  if (reason && reason.startsWith("UNSUPPORTED_TYPE"))
+    return "This problem uses types that cannot be executed yet (e.g. linked lists or trees). Chat and explanations still work.";
+  return "This problem cannot be executed here. Chat and explanations still work.";
 }
 
 
@@ -240,8 +257,8 @@ export async function orchestrateDebug(
       };
     }
 
-    // Detect actual language for display, but always send python3 to backend
-    // (MOCK mode and Phase 1 engine only support Python 3)
+    // The REAL editor language is sent. The backend answers supported=false (explanation-only) for anything but
+    // Python 3 instead of running e.g. Java as Python.
     const detectedLang = await getCurrentLanguage();
     const contentHash = await sha256Short(statementText + detectedLang);
 
@@ -255,8 +272,7 @@ export async function orchestrateDebug(
       examples: getExamples(),
       constraints_text: getConstraints(),
       starter_python: getStarterCode(detectedLang) ?? undefined,
-      // Always send python3 so MOCK + real backend accepts the capture
-      lang_selected: "python3",
+      lang_selected: detectedLang,
       content_hash: contentHash,
       captured_at: new Date().toISOString(),
       run_capture: getRunPanelCapture() ?? undefined,
@@ -285,16 +301,19 @@ export async function orchestrateDebug(
       return { ok: false, error: { kind: "capture_failed", message: "Backend unavailable — is it running at localhost:8000?", detail: String(err) } };
     }
 
-    // ── Do NOT gate on capture.supported — show panels even for unsupported langs.
-    // The result card will display a warning flag instead of blocking the user.
-    // This lets the UI demo work on any problem / language in Phase 1.
+    // Unsupported language / problem type: no execution, but the card still opens (chat + explanations work).
+    if (capture.supported === false) {
+      const reason = capture.reason ?? "UNSUPPORTED";
+      return { ok: true, data: { explanationOnly: explanationOnlyMessage(reason, detectedLang), capture,
+                                 analysis: chatOnlyAnalysis(reason), problem, code } };
+    }
 
     // 4. POST /analyze
     const req: AnalyzeRequest = {
       user_id: "local-user",
       problem_slug: slug,
       code,
-      language: "python3",
+      language: detectedLang,
       run_capture: problem.run_capture ?? null,
       paste_chars: totalPasteChars,
       elapsed_ms: Date.now() - pageLoadTime,

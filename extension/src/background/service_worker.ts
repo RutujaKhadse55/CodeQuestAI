@@ -5,7 +5,7 @@
 
 import {
   checkHealth, captureProblem, analyzeProblem, getHint, getDashboard, getExplanation,
-  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend,
+  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend, chatSendStream,
 } from "../api/client";
 import type { LCProblem, AnalyzeRequest } from "../api/types";
 
@@ -22,11 +22,28 @@ type SWMessage =
   | { type: "CHAT_STATUS" }
   | { type: "CHAT_GRANT"; username: string }
   | { type: "CHAT_REVOKE" }
-  | { type: "CHAT_SEND"; slug: string; text: string }
+  | { type: "CHAT_SEND"; slug: string; text: string; code?: string; codeLanguage?: string }
   | { type: "GET_MONACO_SELECTION" }
   | { type: "GET_FULL_CODE" }
   | { type: "PLAY_TTS"; text: string; lang?: string }
   | { type: "STOP_TTS" };
+
+// ── streamed chat: content script opens a Port, the SW relays the backend SSE events ──────────────────────
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "cq-chat") return;
+  let open = true;
+  port.onDisconnect.addListener(() => { open = false; });
+  port.onMessage.addListener(async (m: { slug: string; text: string; code?: string; codeLanguage?: string }) => {
+    const send = (e: unknown) => { if (open) { try { port.postMessage(e); } catch { open = false; } } };
+    try {
+      await chatSendStream(m.slug, m.text, send, { code: m.code, codeLanguage: m.codeLanguage });
+    } catch (err) {
+      send({ event: "error", data: { message: String(err) } });
+    }
+    send({ event: "end" });
+  });
+});
 
 // ── message listener ──────────────────────────────────────────────────────────
 
@@ -75,7 +92,7 @@ async function handleMessage(
     case "CHAT_REVOKE":
       return chatRevokeConsent();
     case "CHAT_SEND":
-      return chatSend(msg.slug, msg.text);
+      return chatSend(msg.slug, msg.text, { code: msg.code, codeLanguage: msg.codeLanguage });
 
     // ── Monaco: read selected text ───────────────────────────────────────────
     case "GET_MONACO_SELECTION": {

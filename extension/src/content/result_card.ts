@@ -1,7 +1,8 @@
 // ─── Result Card — Shadow DOM panel ──────────────────────────────────────────
 // Fully matches the CodeQuest reference screenshots.
 
-import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus } from "../api/types";
+import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus, ChatStreamEvent } from "../api/types";
+import { renderMarkdown, stripMarkdown } from "./markdown";
 import { LOGO_DATA_URL } from "../assets/logo";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -417,8 +418,41 @@ const CARD_CSS = `
   border-radius: 4px 14px 14px 14px;
   padding: 10px 13px; font-size: 0.84rem; color: #374151;
   line-height: 1.55; max-width: 82%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.06); white-space: pre-wrap;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.chat-col { display: flex; flex-direction: column; gap: 4px; max-width: 86%; min-width: 0; }
+.chat-col .chat-text { max-width: 100%; }
+/* rendered Markdown (assistant replies) */
+.chat-text.md { white-space: normal; }
+.md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 9px; }
+.md strong { font-weight: 700; color: #111827; } .md em { font-style: italic; } .md del { opacity: .65; }
+.md ul, .md ol { margin: 4px 0 9px; padding-left: 20px; } .md li { margin: 3px 0; } .md li > ul, .md li > ol { margin: 3px 0; }
+.md h3, .md h4, .md h5 { margin: 12px 0 5px; font-weight: 700; color: #111827; line-height: 1.3; }
+.md h3 { font-size: 1.02rem; } .md h4 { font-size: .93rem; } .md h5 { font-size: .86rem; text-transform: none; }
+.md code { background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 4px; padding: 1px 5px; font: .78rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #b45309; }
+.md .cq-code { margin: 9px 0; border-radius: 9px; overflow: hidden; border: 1px solid #1e293b; background: #0f172a; }
+.md .cq-code-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; background: #1e293b; color: #94a3b8; font-size: .68rem; text-transform: lowercase; }
+.md .cq-copy { background: transparent; color: #cbd5e1; border: 1px solid #475569; border-radius: 5px; padding: 1px 8px; font-size: .66rem; cursor: pointer; }
+.md .cq-copy:hover { background: #334155; }
+.md .cq-code pre { margin: 0; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.md .cq-code pre code { background: none; border: 0; padding: 0; color: #e2e8f0; font-size: .77rem; }
+.md blockquote { margin: 7px 0; padding: 5px 11px; border-left: 3px solid #d97706; background: #fffbeb; color: #92400e; border-radius: 0 6px 6px 0; }
+.md blockquote > :last-child { margin-bottom: 0; }
+.md .cq-table { overflow-x: auto; margin: 7px 0; }
+.md table { border-collapse: collapse; font-size: .78rem; } .md th, .md td { border: 1px solid #e5e7eb; padding: 4px 9px; text-align: left; } .md th { background: #f9fafb; font-weight: 700; }
+.md hr { border: 0; border-top: 1px solid #e5e7eb; margin: 11px 0; }
+.md a { color: #1d7eef; text-decoration: underline; }
+.chat-chips { display: flex; gap: 5px; flex-wrap: wrap; padding-left: 2px; }
+.chat-chip { font-size: .64rem; font-weight: 600; color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; padding: 1px 8px; }
+.chat-chip.good { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.chat-chip.warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.chat-tools { display: flex; gap: 6px; padding-left: 2px; opacity: 0; transition: opacity .15s; }
+.chat-col:hover .chat-tools, .chat-col:focus-within .chat-tools { opacity: 1; }
+.chat-tool { background: none; border: 0; color: #9ca3af; font-size: .68rem; cursor: pointer; padding: 0 2px; }
+.chat-tool:hover { color: #374151; }
+.cq-caret::after { content: "▍"; margin-left: 1px; color: #d97706; animation: cqblink 1s steps(2) infinite; }
+@keyframes cqblink { 50% { opacity: 0; } }
 .chat-bubble.user { flex-direction: row-reverse; }
 .chat-bubble.user .chat-av { background: linear-gradient(135deg, #374151, #1f2937); }
 .chat-bubble.user .chat-text {
@@ -520,6 +554,10 @@ export class ResultCard {
   private attemptId: number | null = null;
   private slug = "";
   private unsupportedLang: string | null = null;
+  private explanationOnly: string | null = null;
+  private reviewCode = "";
+  private reviewLang = "";
+  private reviewSent = false;
   private traceIter = 1;
   private traceTotalIter = 3; // simulated steps; Phase 3: from real tracer
 
@@ -549,10 +587,14 @@ export class ResultCard {
     this.shadow.getElementById("cq-close-btn")?.addEventListener("click", () => this.close());
   }
 
-  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string): void {
+  /** The learner's code + editor language, used for the AI review when the code cannot be executed. */
+  setReviewCode(code: string, language: string): void { this.reviewCode = code; this.reviewLang = language; this.reviewSent = false; }
+
+  showResults(res: AnalyzeResponse, slug: string, unsupportedLang?: string, explanationOnly?: string): void {
     this.response = res; this.attemptId = res.attempt_id;
     this.slug = slug; this.unsupportedLang = unsupportedLang ?? null;
-    this.activeTab = "verdict"; this.traceIter = 1;
+    this.explanationOnly = explanationOnly ?? null;
+    this.activeTab = explanationOnly ? "chat" : "verdict"; this.traceIter = 1; // nothing ran: open the chat directly
     // estimate trace steps from iteration field
     if (res.diagnosis?.divergence?.iteration) this.traceTotalIter = Math.max(3, res.diagnosis.divergence.iteration + 1);
     this.panel.classList.add("open"); this.host.style.pointerEvents = "all";
@@ -852,7 +894,7 @@ export class ResultCard {
         <div class="chat-messages" id="cq-chat-messages">
           <div class="chat-bubble">
             <div class="chat-av">AI</div>
-            <div class="chat-text">The problem asks for ${slug.includes("two-sum") ? "indices of two numbers that sum to target. Have you considered edge cases?" : "a solution. How can I help you today?"}</div>
+            <div class="chat-text">Hi! I can explain this problem, help you find why your code fails, or give you hints. I will not hand over the full solution.</div>
           </div>
         </div>
         <div class="chat-input-row">
@@ -868,8 +910,8 @@ export class ResultCard {
   private render(): void {
     if (!this.response) return;
     const res = this.response;
-    const warn = this.unsupportedLang && this.unsupportedLang !== "python3"
-      ? `<div class="cq-warn">⚠️ Mock mode — language <strong>${this.unsupportedLang}</strong> is not yet executed.</div>` : "";
+    const warn = this.explanationOnly
+      ? `<div class="cq-warn">ℹ️ ${this.explanationOnly.replace(/[<>&]/g, "")}</div>` : "";
 
     this.panel.innerHTML = `
       ${this.hdr(res.verified as "oracle-verified" | "unverified" | null)}
@@ -940,6 +982,7 @@ export class ResultCard {
     const { slug, attemptId } = this;
     for (let lv = 1; lv <= (res.allowed_hint_level ?? 1); lv++) {
       const el = this.shadow.getElementById(`cq-hint-text-${lv}`);
+      if (el && !attemptId) { el.textContent = "Hints need an analysed attempt: run Debug on Python 3 code."; continue; }
       if (!el || !slug || !attemptId) continue;
       const lvCopy = lv;
       chrome.runtime.sendMessage({ type: "GET_HINT", slug, attemptId, level: lvCopy })
@@ -1016,11 +1059,33 @@ export class ResultCard {
     const msgs = this.shadow.getElementById("cq-chat-messages");
     if (!input || !sendBtn || !msgs) return;
 
-    const addBubble = (text: string, isUser: boolean) => {
+    // Assistant bubbles render Markdown (bold, lists, code, tables…) safely; user bubbles stay plain text.
+    const addBubble = (text: string, isUser: boolean): HTMLElement => {
       const w = document.createElement("div"); w.className = `chat-bubble${isUser ? " user" : ""}`;
       const av = document.createElement("div"); av.className = "chat-av"; av.textContent = isUser ? "U" : "AI";
-      const b = document.createElement("div"); b.className = "chat-text"; b.textContent = text;
-      w.appendChild(av); w.appendChild(b); msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
+      const col = document.createElement("div"); col.className = "chat-col";
+      const b = document.createElement("div"); b.className = isUser ? "chat-text" : "chat-text md";
+      if (isUser) b.textContent = text; else b.appendChild(renderMarkdown(text));
+      col.appendChild(b);
+      if (!isUser) {
+        const tools = document.createElement("div"); tools.className = "chat-tools";
+        const copy = document.createElement("button"); copy.className = "chat-tool"; copy.textContent = "⧉ Copy";
+        copy.addEventListener("click", () => {
+          navigator.clipboard.writeText(b.dataset.raw ?? b.textContent ?? "").catch(() => {});
+          copy.textContent = "✓ Copied"; setTimeout(() => { copy.textContent = "⧉ Copy"; }, 1200);
+        });
+        const speak = document.createElement("button"); speak.className = "chat-tool"; speak.textContent = "🔊 Listen";
+        speak.addEventListener("click", () => playText(stripMarkdown(b.dataset.raw ?? b.textContent ?? "")));
+        tools.append(copy, speak); col.appendChild(tools);
+      }
+      w.appendChild(av); w.appendChild(col); msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
+      return b;
+    };
+    const chips = (target: HTMLElement, items: Array<[string, "good" | "warn" | ""]>) => {
+      if (!items.length) return;
+      const row = document.createElement("div"); row.className = "chat-chips";
+      items.forEach(([t, k]) => { const c = document.createElement("span"); c.className = `chat-chip ${k}`.trim(); c.textContent = t; row.appendChild(c); });
+      target.closest(".chat-col")?.appendChild(row);
     };
 
     const showTyping = () => {
@@ -1039,23 +1104,80 @@ export class ResultCard {
     const call = <T>(m: object): Promise<(T & { error?: string }) | null> =>
       (chrome.runtime.sendMessage(m) as Promise<(T & { error?: string }) | null>).catch(() => null);
 
-    const send = async (text: string, fromUser = true) => {
+    /** Stream one reply through the service worker; resolves when the stream ends. Text is revealed progressively. */
+    const streamReply = (text: string, code?: string) => new Promise<{ ok: boolean; content: string; meta?: Extract<ChatStreamEvent, { event: "meta" }>["data"]; done?: Extract<ChatStreamEvent, { event: "done" }>["data"]; bubble?: HTMLElement }>((resolve) => {
+      let port: chrome.runtime.Port;
+      try { port = chrome.runtime.connect({ name: "cq-chat" }); } catch { resolve({ ok: false, content: "" }); return; }
+      let content = "", shown = 0, ended = false, failed = false, settled = false;
+      let meta: Extract<ChatStreamEvent, { event: "meta" }>["data"] | undefined;
+      let done: Extract<ChatStreamEvent, { event: "done" }>["data"] | undefined;
+      let bubble: HTMLElement | undefined;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const finish = () => {
+        if (settled) return; settled = true; if (timer) clearInterval(timer);
+        bubble?.classList.remove("cq-caret");
+        if (bubble) { bubble.dataset.raw = content; bubble.replaceChildren(renderMarkdown(content)); }
+        try { port.disconnect(); } catch { /* already closed */ }
+        resolve({ ok: content.length > 0, content, meta, done, bubble });
+      };
+      const step = () => {
+        if (bubble && shown < content.length) {
+          shown = Math.min(content.length, shown + Math.max(4, Math.ceil((content.length - shown) / 10)));
+          bubble.replaceChildren(renderMarkdown(content.slice(0, shown)));
+          msgs.scrollTop = msgs.scrollHeight;
+        }
+        if (ended && shown >= content.length) finish();
+      };
+      port.onMessage.addListener((e: ChatStreamEvent) => {
+        if (e.event === "meta") meta = e.data;
+        else if (e.event === "token") {
+          if (!bubble) { hideTyping(); bubble = addBubble("", false); bubble.classList.add("cq-caret"); }
+          content += e.data.text;
+        } else if (e.event === "done") done = e.data;
+        else if (e.event === "error") failed = true;
+        else if (e.event === "end") ended = true;
+        if (!timer) timer = setInterval(step, 24);
+        if (failed && !content) finish();
+      });
+      port.onDisconnect.addListener(() => { ended = true; if (!content) finish(); });
+      port.postMessage({ slug: this.slug, text, code, codeLanguage: code ? this.reviewLang : undefined });
+    });
+
+    const send = async (text: string, fromUser = true, code?: string) => {
       if (fromUser) addBubble(text, true);
       showTyping();
-      const r = await call<ChatSendResponse>({ type: "CHAT_SEND", slug: this.slug, text });
-      hideTyping();
-      if (!r || r.error || !r.reply) {
-        const local = this.chatReply(text);
-        addBubble(local, false); playText(local);
-        addNote("Offline mode: could not reach the CodeQuest chat service.");
-        return;
+      let r = await streamReply(text, code);
+      if (!r.ok) {
+        // streaming unavailable: try the plain JSON endpoint once, then the local canned reply
+        const j = await call<ChatSendResponse>({ type: "CHAT_SEND", slug: this.slug, text, code, codeLanguage: code ? this.reviewLang : undefined });
+        hideTyping();
+        if (j && !j.error && j.reply) {
+          const b = addBubble(j.reply.content, false); b.dataset.raw = j.reply.content;
+          r = { ok: true, content: j.reply.content, bubble: b,
+                meta: { thread_id: j.thread_id, language: j.reply.language, mode: j.reply.mode, tools_used: j.reply.tools_used, personalized: j.reply.personalized } };
+        } else {
+          const local = this.chatReply(text);
+          const b = addBubble(local, false); b.dataset.raw = local;
+          addNote("Offline mode: could not reach the CodeQuest chat service.");
+          playText(local);
+          return;
+        }
       }
-      addBubble(r.reply.content, false);
-      const bits = [r.reply.personalized ? "🔒 personalised" : "", r.reply.mode === "refusal" ? "solution withheld" : "",
-        r.reply.mode === "guard_fallback" ? "answer filtered" : ""].filter(Boolean);
-      if (bits.length) addNote(bits.join(" · "));
-      playText(r.reply.content);
+      hideTyping();
+      const m = r.meta;
+      const tags: Array<[string, "good" | "warn" | ""]> = [];
+      if (m?.personalized) tags.push(["🔒 Personalised", "good"]);
+      if (m?.mode === "refusal") tags.push(["Solution withheld", "warn"]);
+      if (m?.mode === "guard_fallback") tags.push(["Filtered for safety", "warn"]);
+      if (m?.mode === "fallback") tags.push(["Basic mode (AI model unavailable)", ""]);
+      if (r.done?.sources?.length) tags.push([`Sources: ${r.done.sources.slice(0, 3).join(", ")}`, ""]);
+      if (r.bubble) chips(r.bubble, tags);
+      playText(stripMarkdown(r.content));
     };
+
+    const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ""; send(t); };
+    sendBtn.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 
     // ── Profile consent: asked when the chat opens (until the learner decides) ──
     const consentCard = async () => {
@@ -1108,15 +1230,19 @@ export class ResultCard {
       } else consentCard();
     });
 
-    const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ""; send(t); };
-    sendBtn.addEventListener("click", submit);
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
-
     this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", () => {
       send("Explain this problem to me in simple words.");
     });
 
+    const reviewNow = () => {
+      if (!this.reviewCode.trim()) { addNote("No code found in the editor to review."); return; }
+      send(`Review my ${this.reviewLang} code for this problem: what might be wrong, and what should I think about?`, true, this.reviewCode);
+    };
+    // Nothing could be executed (e.g. Java): review the code with the AI right away, once per Debug click.
+    if (this.explanationOnly && this.reviewCode.trim() && !this.reviewSent) { this.reviewSent = true; setTimeout(reviewNow, 400); }
+
     this.shadow.getElementById("cq-cab-debug")?.addEventListener("click", () => {
+      if (this.explanationOnly) { reviewNow(); return; }
       this.activeTab = "verdict";
       this.shadow.querySelectorAll(".cq-tab").forEach((b) => b.classList.remove("active"));
       this.shadow.querySelectorAll(".cq-tab-panel").forEach((p) => p.classList.remove("active"));

@@ -7,6 +7,7 @@ import type {
   AnalyzeResponse,
   CaptureResponse,
   ChatSendResponse,
+  ChatStreamEvent,
   ConsentInfo,
   ConsentStatus,
   HealthResponse,
@@ -197,12 +198,14 @@ async function threadFor(slug: string, fresh = false): Promise<string> {
 }
 
 /** Send one chat message about the problem `slug` (one thread per problem, created on demand). */
-export async function chatSend(slug: string, content: string): Promise<ChatSendResponse> {
+export interface ChatExtras { code?: string; codeLanguage?: string }
+
+export async function chatSend(slug: string, content: string, extras: ChatExtras = {}): Promise<ChatSendResponse> {
   const post = async (fresh: boolean) => {
     const id = await threadFor(slug, fresh);
     return learnerFetch<ChatSendResponse>(`/chat/threads/${id}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, code: extras.code, code_language: extras.codeLanguage }),
     });
   };
   try {
@@ -210,6 +213,56 @@ export async function chatSend(slug: string, content: string): Promise<ChatSendR
   } catch (err) {
     if (/^403\b/.test(String((err as Error).message))) return post(true); // thread gone (e.g. backend DB reset)
     throw err;
+  }
+}
+
+/**
+ * Streamed chat: relays the backend's SSE events (meta, token*, done) to `onEvent`. The backend only streams text
+ * that already passed the Guard. Thread creation, learner re-registration and the 403/401 retries mirror chatSend.
+ */
+export async function chatSendStream(
+  slug: string,
+  content: string,
+  onEvent: (e: ChatStreamEvent) => void,
+  extras: ChatExtras = {},
+): Promise<void> {
+  const open = async (fresh: boolean): Promise<Response> => {
+    const learner = await ensureLearner();
+    const { backendUrl, backendToken } = await getConfig();
+    const id = await threadFor(slug, fresh);
+    return fetch(`${backendUrl.replace(/\/$/, "")}/chat/threads/${id}/messages?stream=true`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        "X-API-Token": backendToken,
+        Authorization: `Bearer ${backendToken}`,
+        "X-User-Token": learner.userToken,
+      },
+      body: JSON.stringify({ content, code: extras.code, code_language: extras.codeLanguage }),
+    });
+  };
+  let res = await open(false);
+  if (res.status === 403) res = await open(true); // thread gone
+  if (res.status === 401) { await ensureLearner(true); res = await open(true); } // token unknown to the backend
+  if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}: ${await res.text().catch(() => "")}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let cut: number;
+    while ((cut = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      const ev = /^event: (\w+)/.exec(block)?.[1];
+      const raw = block.split("\ndata: ")[1];
+      if (!ev || raw === undefined) continue;
+      try { onEvent({ event: ev, data: JSON.parse(raw) } as ChatStreamEvent); } catch { /* malformed block: skip */ }
+    }
   }
 }
 

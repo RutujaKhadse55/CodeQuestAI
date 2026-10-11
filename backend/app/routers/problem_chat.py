@@ -47,6 +47,10 @@ class MessageRequest(BaseModel):
     user_id: str | None = None
     content: str = Field(min_length=1, max_length=1000)
     language: str | None = None
+    # Optional: the learner's code for an AI REVIEW (any language). It is never executed; the model sees it as
+    # untrusted <data>. This is how Java / C++ / JavaScript get feedback although only Python 3 can be run.
+    code: str | None = Field(default=None, max_length=8000)
+    code_language: str | None = Field(default=None, max_length=20)
 
 
 @router.get("/consent-info", dependencies=[Depends(_enabled)])
@@ -110,7 +114,7 @@ def _chunks(text: str, n: int = 6):
 def post_message(thread_id: str, req: MessageRequest, request: Request, stream: bool = Query(default=False),
                  session: Session = Depends(get_session), token: str = Depends(user_token_header)):
     uid = resolve_user(session, req.user_id, token)
-    result = service.post_message(session, thread_id, uid, req.content, req.language)
+    result = service.post_message(session, thread_id, uid, req.content, req.language, req.code, req.code_language)
     if not stream and "text/event-stream" not in request.headers.get("accept", ""):
         return result
     reply = result["reply"]

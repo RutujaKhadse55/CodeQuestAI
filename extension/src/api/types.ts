@@ -152,3 +152,11 @@ export interface ChatSendResponse {
   message_id: number;
   reply: ChatReply;
 }
+
+/** Events relayed from the backend SSE stream (POST /chat/threads/{id}/messages?stream=true). */
+export type ChatStreamEvent =
+  | { event: "meta"; data: { thread_id: string; language: string; mode: string; tools_used: string[]; personalized: boolean } }
+  | { event: "token"; data: { text: string } }
+  | { event: "done"; data: { message_id: number; guard: ChatReply["guard"]; sources: string[]; allowed_hint_level?: number | null } }
+  | { event: "error"; data: { message: string } }
+  | { event: "end"; data?: undefined };

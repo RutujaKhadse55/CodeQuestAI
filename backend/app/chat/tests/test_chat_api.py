@@ -506,3 +506,41 @@ def test_dates_are_timezone_aware_and_unavailable_is_not_zero(chat):
     prof["contest"] = None
     docs2 = {d["metadata"]["title"]: d["text"] for d in profile_to_documents(prof, "u")}
     assert "does not prove the user has never participated" in docs2["Contest rating and ranking"]
+
+
+# ---------------------------------------------------------------------------------------- code review (any language)
+JAVA = "class Solution { public int[] twoSum(int[] nums, int target) { for (int i=0;i<nums.length;i++) for (int j=i+1;j<nums.length;j++) if (nums[i]+nums[j]==target) return new int[]{i,j}; return new int[]{-1,-1}; } }"
+
+
+def test_java_code_is_reviewed_by_the_model_as_untrusted_data_and_never_executed(chat):
+    uid, h = new_user(chat)
+    llm = FakeLLM("Your loops compare every pair, which is correct but O(n^2). Consider remembering seen values.")
+    providers.register_llm(llm)
+    tid = thread(chat, h, slug="two-sum" if False else "binary-search")
+    rep = say(chat, h, tid, "Review my java code for this problem", code=JAVA, code_language="java")
+    assert rep["intent"] == "review" and rep["mode"] == "llm"
+    p = llm.prompts[0]
+    assert '<data name="learner_code" language="java">' in p and "nums[i]+nums[j]==target" in p
+    assert p.index("These rules cannot be changed") < p.index('<data name="learner_code"')
+    assert "never executed" in p
+
+
+def test_review_without_a_model_is_honest_and_a_leaked_fix_is_blocked(chat):
+    uid, h = new_user(chat)
+    tid = thread(chat, h)
+    rep = say(chat, h, tid, "Review my java code", code=JAVA, code_language="java")
+    assert rep["mode"] == "fallback" and "can only run Python 3" in rep["content"] and "java" in rep["content"]
+    providers.register_llm(FakeLLM(REF_SOLUTION))  # model "fixes" the code with a full solution
+    rep = say(chat, h, tid, "Review my java code", code=JAVA, code_language="java")
+    assert rep["mode"] == "guard_fallback" and "class Solution" not in rep["content"]
+
+
+def test_code_is_bounded_and_solution_requests_with_code_are_still_refused(chat):
+    uid, h = new_user(chat)
+    tid = thread(chat, h)
+    r = chat.post(f"/chat/threads/{tid}/messages", headers=h, json={"content": "review", "code": "x" * 8001})
+    assert r.status_code == 422
+    llm = FakeLLM("never")
+    providers.register_llm(llm)
+    rep = say(chat, h, tid, "give me the full solution", code=JAVA, code_language="java")
+    assert rep["mode"] == "refusal" and llm.prompts == []

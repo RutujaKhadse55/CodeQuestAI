@@ -138,7 +138,8 @@ def delete_thread(session: Session, thread_id: str, user_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------------- messages
-def post_message(session: Session, thread_id: str, user_id: str, content: str, language: str | None) -> dict:
+def post_message(session: Session, thread_id: str, user_id: str, content: str, language: str | None,
+                 code: str | None = None, code_language: str | None = None) -> dict:
     t = _thread(session, thread_id, user_id)
     row = session.get(LCProblemRow, t.problem_slug)
     if row is None:
@@ -148,7 +149,7 @@ def post_message(session: Session, thread_id: str, user_id: str, content: str, l
     session.commit()
     ctx = ToolContext(session=session, user_id=user_id, thread=t, problem_row=row,
                       problem=LCProblem.model_validate_json(row.payload_json), language=t.language)
-    reply = agent.respond(ctx, content, language)
+    reply = agent.respond(ctx, content, language, code=code, code_language=code_language)
     if language is None and reply["language"] != t.language and detect_lang(content, t.language) == reply["language"]:
         t.language = reply["language"]  # the thread follows the language the learner actually writes in
     am = ChatMessage(thread_id=t.id, role="assistant", content=reply["content"],

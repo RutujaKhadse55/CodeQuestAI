@@ -250,7 +250,8 @@ function onDebugClick(): void {
     .then((outcome) => {
       if (outcome.ok) {
         const lang = outcome.data.problem.lang_selected;
-        card.showResults(outcome.data.analysis, outcome.data.problem.slug, lang);
+        card.setReviewCode(outcome.data.code, lang);
+        card.showResults(outcome.data.analysis, outcome.data.problem.slug, lang, outcome.data.explanationOnly);
       } else {
         card.showError(outcome.error.message, outcome.error.detail);
       }
