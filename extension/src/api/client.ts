@@ -1,70 +1,107 @@
-// ─── Typed API client — wraps all fetch calls to the backend ───────────────
-// All network requests go through the service worker (SW).
-// This module is imported by the SW; content scripts use chrome.runtime.sendMessage.
+// ─── Typed API Client ─────────────────────────────────────────────────────────
+// All network calls go through the Service Worker (see service_worker.ts).
+// This module is used directly by the SW — never by content scripts.
 
-import type { LCProblem, AnalyzeResponse, HealthResponse } from "./types";
+import type {
+  AnalyzeRequest,
+  AnalyzeResponse,
+  CaptureResponse,
+  HealthResponse,
+  HintResult,
+  LCProblem,
+} from "./types";
 
-// ── storage helpers ──────────────────────────────────────────────────────────
+// ── config ────────────────────────────────────────────────────────────────────
 
-export async function getSettings(): Promise<{ backendUrl: string; token: string }> {
+interface StorageItems {
+  backendUrl: string;
+  backendToken: string;
+}
+
+async function getConfig(): Promise<StorageItems> {
   return new Promise((resolve) => {
     chrome.storage.sync.get(
-      { backendUrl: "http://localhost:8000", token: "" },
-      (items) => resolve(items as { backendUrl: string; token: string })
+      { backendUrl: "http://localhost:8000", backendToken: "dev" },
+      (items) => resolve(items as StorageItems)
     );
   });
 }
 
-// ── core fetch ───────────────────────────────────────────────────────────────
+// ── fetch helper ──────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const { backendUrl, token } = await getSettings();
-  const url = `${backendUrl}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  });
+  const { backendUrl, backendToken } = await getConfig();
+  const url = `${backendUrl.replace(/\/$/, "")}${path}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string> ?? {}),
+  };
+  if (backendToken) {
+    // Backend accepts either header — send both for compatibility
+    headers["X-API-Token"] = backendToken;
+    headers["Authorization"] = `Bearer ${backendToken}`;
+  }
+
+  const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
-    const body = await res.text().catch(() => res.statusText);
-    throw new Error(`API ${res.status}: ${body}`);
+    const body = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
   return res.json() as Promise<T>;
 }
 
-// ── endpoints ────────────────────────────────────────────────────────────────
+// ── endpoints ─────────────────────────────────────────────────────────────────
 
-export function checkHealth(): Promise<HealthResponse> {
+/** GET /health */
+export async function checkHealth(): Promise<HealthResponse> {
   return apiFetch<HealthResponse>("/health");
 }
 
-export function captureProblem(problem: LCProblem): Promise<{ slug: string }> {
-  return apiFetch<{ slug: string }>("/problems/capture", {
+/** POST /problems/capture — idempotent, registers the problem with the backend */
+export async function captureProblem(problem: LCProblem): Promise<CaptureResponse> {
+  return apiFetch<CaptureResponse>("/problems/capture", {
     method: "POST",
     body: JSON.stringify(problem),
   });
 }
 
-export interface AnalyzeRequest {
-  slug: string;
-  source: "leetcode";
-  code: string;
-  lang: string;
-  paste_chars?: number;
-  elapsed_ms?: number;
-  lang_pref?: "en" | "hi" | "mr";
-  run_capture?: LCProblem["run_capture"];
-}
-
-export function analyzeProblem(req: AnalyzeRequest): Promise<AnalyzeResponse> {
+/** POST /analyze — run tests, fuzz, diagnose */
+export async function analyzeProblem(req: AnalyzeRequest): Promise<AnalyzeResponse> {
   return apiFetch<AnalyzeResponse>("/analyze", {
     method: "POST",
     body: JSON.stringify(req),
   });
 }
+
+/** POST /hint — get the next hint for the current attempt */
+export async function getHint(
+  problemSlug: string,
+  attemptId: number,
+  level: number
+): Promise<HintResult> {
+  return apiFetch<HintResult>("/hint", {
+    method: "POST",
+    body: JSON.stringify({ problem_slug: problemSlug, attempt_id: attemptId, level }),
+  });
+}
+
+/** GET /dashboard/{user_id} — mastery, mistakes, recent diagnoses */
+export async function getDashboard(userId = "local-user"): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(`/dashboard/${userId}`);
+}
+
+/** POST /explain — LLM plain-language explanation for a given attempt */
+export async function getExplanation(
+  attemptId: number,
+  lang = "en"
+): Promise<{ text: string }> {
+  return apiFetch<{ text: string }>("/explain", {
+    method: "POST",
+    body: JSON.stringify({ attempt_id: attemptId, lang }),
+  });
+}
+
+export type { AnalyzeRequest };

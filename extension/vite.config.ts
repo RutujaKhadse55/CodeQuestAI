@@ -5,7 +5,6 @@ import manifest from "./manifest.json";
 import path from "path";
 
 export default defineConfig({
-  // Allow resolving files outside the project root (e.g. shared/locales)
   resolve: {
     alias: {
       "@locales": path.resolve(__dirname, "../shared/locales"),
@@ -17,6 +16,7 @@ export default defineConfig({
       input: {
         options: "src/options/index.html",
         popup: "src/popup/index.html",
+        offscreen: "src/offscreen/offscreen.html",
       },
     },
   },

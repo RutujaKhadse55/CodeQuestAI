@@ -1,83 +1,109 @@
-// ─── Shared TypeScript types mirroring the backend contracts ───────────────
-// Source of truth: openapi.yaml (generated via `npm run gen-types`)
-// Hand-maintained here for Phase 0 before the full spec is frozen.
+// ─── API Contract Types — mirrors backend/app/contracts/models.py ─────────────
+// Keep in sync with the Pydantic models. Field names MUST match exactly.
 
-export interface LCProblem {
-  slug: string;
-  source: "leetcode";
-  title: string;
-  difficulty: "Easy" | "Medium" | "Hard";
-  tags: string[];
-  statement_text: string; // HTML-stripped, ≤ 8000 chars
-  examples: Array<{ input_text: string; output_text: string }>;
-  constraints_text: string;
-  starter_python: string;
-  lang_selected: string;
-  captured_at: string; // ISO timestamp
-  content_hash: string;
-  run_capture?: RunCapture;
+export interface Example {
+  input_text: string;
+  output_text: string;
 }
 
 export interface RunCapture {
-  verdict: "Wrong Answer" | "Runtime Error" | "Time Limit Exceeded" | "Accepted";
-  input: string;
-  output: string;
-  expected: string;
-  stdout: string;
-  error: string;
+  verdict: string;
+  input?: string | null;
+  output?: string | null;
+  expected?: string | null;
+  stdout?: string | null;
+  error?: string | null;
 }
 
+export interface LCProblem {
+  slug: string;
+  source?: string;
+  title: string;
+  difficulty: string;
+  tags: string[];
+  statement_text: string;
+  examples: Example[];
+  constraints_text: string;
+  starter_python?: string | null;
+  lang_selected: string;
+  content_hash: string;
+  captured_at?: string;
+  run_capture?: RunCapture | null;
+}
+
+// ── POST /problems/capture ────────────────────────────────────────────────────
+
+export interface CaptureResponse {
+  problem_id: string;
+  slug?: string | null;
+  supported: boolean;
+  reason?: string | null;
+}
+
+// ── POST /analyze ─────────────────────────────────────────────────────────────
+
+export interface AnalyzeRequest {
+  user_id?: string;
+  problem_slug: string;    // also accepted as "slug" by backend (AliasChoices)
+  code: string;
+  language: string;        // also accepted as "lang"
+  lang_pref?: string | null;
+  run_capture?: RunCapture | null;
+  paste_chars?: number;
+  elapsed_ms?: number;
+}
+
+export type Outcome = "passed" | "wrong_output" | "runtime_error" | "timeout";
+export type TestKind = "example" | "run_capture" | "fuzz";
+export type Verified = "oracle-verified" | "unverified";
+
 export interface TestResult {
-  test_index: number;
-  input: string;
-  expected: string;
-  actual: string;
-  status: "passed" | "wrong_output" | "runtime_error" | "timeout";
-  is_example: boolean;
-  is_fuzz: boolean; // fuzz inputs are never shown — only the status
+  kind: TestKind;
+  outcome: Outcome;
+  input?: string | null;
+  expected?: string | null;
+  actual?: string | null;
+  failure_class?: string | null;
+  error?: string | null;
+}
+
+export interface Divergence {
+  iteration?: number | null;
+  variable?: string | null;
+  expected?: unknown;
+  actual?: unknown;
+  line?: number | null;
 }
 
 export interface Diagnosis {
-  failure_class: string | null;
-  mistake_class: string | null;
+  mistake_class?: string | null;
   confidence: number;
-  verified: boolean;
-}
-
-export interface NeutralMessage {
-  title: string;
-  body: string;
-  lang: "en" | "hi" | "mr";
-  verbosity: "brief" | "standard" | "detailed";
-}
-
-export interface HintResult {
-  level: 1 | 2 | 3 | 4;
-  text: string;
-  locked: boolean;
-  unlock_requirement?: string;
+  failure_class?: string | null;
+  divergence?: Divergence | null;
 }
 
 export interface AnalyzeResponse {
-  attempt_id: string;
-  test_results: TestResult[];
-  diagnosis: Diagnosis;
-  explanation: NeutralMessage;
-  hints: HintResult[];
-  trace?: TraceEvent[];
-  copy_flagged: boolean;
-  hardcode_flagged: boolean;
+  attempt_id: number;
+  verified: Verified;
+  results: TestResult[];
+  diagnosis?: Diagnosis | null;
+  explanation?: string | null;
+  flags: string[];
+  allowed_hint_level?: number | null;
 }
 
-export interface TraceEvent {
-  iteration: number;
-  variable: string;
-  expected: unknown;
-  actual: unknown;
-  learner_line: number;
+// ── POST /hint ────────────────────────────────────────────────────────────────
+
+export interface HintResult {
+  level: number;
+  text: string;
+  locked?: boolean;
+  requirements?: string | null;
 }
+
+// ── GET /health ───────────────────────────────────────────────────────────────
 
 export interface HealthResponse {
-  status: "ok";
+  status: string;
   version: string;
 }
