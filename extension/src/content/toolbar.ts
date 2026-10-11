@@ -25,6 +25,27 @@ function isContextValid(): boolean {
   try { return !!chrome.runtime?.id; } catch { return false; }
 }
 
+/**
+ * After the extension is reloaded/updated, content scripts already injected into open tabs lose their connection
+ * ("Extension context invalidated"). Remove the dead UI and show one hint instead of throwing errors.
+ */
+let staleNoticeShown = false;
+function onContextInvalidated(): void {
+  document.getElementById("codequest-toolbar-host")?.remove();
+  document.getElementById("codequest-result-host")?.remove();
+  if (staleNoticeShown) return;
+  staleNoticeShown = true;
+  const n = document.createElement("div");
+  n.textContent = "CodeQuest AI was updated — refresh this page to use it again.";
+  n.style.cssText = "position:fixed;bottom:16px;right:16px;z-index:2147483647;background:#14141c;color:#fff;border:2px solid #f5c542;"
+    + "border-radius:10px;padding:10px 14px;font:13px system-ui,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.5)";
+  document.documentElement.appendChild(n);
+  setTimeout(() => n.remove(), 8000);
+}
+const isInvalidated = (v: unknown): boolean => /context invalidated|Extension context/i.test(String((v as Error)?.message ?? v));
+window.addEventListener("unhandledrejection", (e) => { if (isInvalidated(e.reason)) { e.preventDefault(); onContextInvalidated(); } });
+window.addEventListener("error", (e) => { if (isInvalidated(e.error ?? e.message)) { e.preventDefault(); onContextInvalidated(); } });
+
 // ── styles ────────────────────────────────────────────────────────────────────
 
 const TOOLBAR_CSS = `

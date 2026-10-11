@@ -4,7 +4,7 @@ import json
 import pytest
 
 from conftest import H, needs_sandbox
-from app import config, lcfetch, providers
+from app import config, providers
 from app.contracts.models import LCProblem
 from app.crew import service
 from app.tests.test_analyze import BAD_TWO_SUM, GOOD_TWO_SUM, _fixture

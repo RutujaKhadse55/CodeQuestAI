@@ -1,0 +1,10 @@
+{
+  "off_by_one_bound": "A loop, slice or index boundary is shifted by one, so the first or last element is skipped or read twice.",
+  "missing_empty_case": "The empty-input case is not handled before the main logic runs.",
+  "wrong_init": "A starting value is wrong (for example 0 instead of negative infinity, or the wrong seed element).",
+  "wrong_comparison": "A comparison is too strict or too loose, or tests the wrong relationship (< vs <=, == vs !=).",
+  "accumulator_reset": "A running value is reset on every iteration, or updated by assignment instead of accumulation.",
+  "wrong_operator": "An arithmetic or logical operator (or operand order) is wrong.",
+  "missing_edge_single": "Very small inputs (one or two elements) take a wrong early path or fall through without returning.",
+  "hardcoded_output": "The answer is copied from the examples instead of being computed from the input."
+}

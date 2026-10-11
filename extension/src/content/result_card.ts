@@ -904,6 +904,13 @@ export class ResultCard {
     const url = this.shadow.getElementById("cq-ex-url") as HTMLInputElement | null;
     const user = this.shadow.getElementById("cq-ex-user") as HTMLInputElement | null;
     if (url && !url.value) url.value = this.problemUrl();
+    if ((!url?.value || !user?.value)) { // fall back to what the backend stored the last time (shared by all tabs)
+      try {
+        const c = (await chrome.runtime.sendMessage({ type: "GET_CONTEXT" }) as { context?: { problem_url: string; leetcode_username: string | null } | null } | null)?.context;
+        if (c && url && !url.value) url.value = c.problem_url;
+        if (c?.leetcode_username && user && !user.value) user.value = c.leetcode_username;
+      } catch { /* offline */ }
+    }
     if (user && !user.value) {
       try {
         const st = await chrome.runtime.sendMessage({ type: "CHAT_STATUS" }) as { granted?: boolean; leetcode_username?: string | null } | null;

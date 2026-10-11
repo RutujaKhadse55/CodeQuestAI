@@ -5,7 +5,7 @@
 
 import {
   checkHealth, captureProblem, analyzeProblem, getHint, getDashboard, getExplanation,
-  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend, chatSendStream, crewCall, ttsSpeak, explainProblem,
+  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend, chatSendStream, crewCall, ttsSpeak, explainProblem, getContext,
 } from "../api/client";
 import type { LCProblem, AnalyzeRequest } from "../api/types";
 
@@ -22,6 +22,7 @@ type SWMessage =
   | { type: "CHAT_STATUS" }
   | { type: "CHAT_GRANT"; username: string }
   | { type: "CHAT_REVOKE" }
+  | { type: "GET_CONTEXT" }
   | { type: "EXPLAIN_PROBLEM"; body: Record<string, unknown> }
   | { type: "CREW"; agent: "explain" | "tests" | "debug" | "trace"; body: Record<string, unknown> }
   | { type: "CHAT_SEND"; slug: string; text: string; code?: string; codeLanguage?: string }
@@ -94,6 +95,8 @@ async function handleMessage(
     case "CHAT_REVOKE":
       return chatRevokeConsent();
     // ── AI crew: explain / generated tests / debug / trace ───────────────────
+    case "GET_CONTEXT":
+      return getContext();
     case "EXPLAIN_PROBLEM":
       return explainProblem(msg.body);
     case "CREW":

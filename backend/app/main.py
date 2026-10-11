@@ -18,6 +18,8 @@ MAX_BODY_BYTES = 2_000_000  # code is capped at 20k chars; this stops oversized 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.create_all()  # no migrations (plan §3.1 rule 5)
+    from .wiring import register_all
+    register_all()
     if not config.MOCK and config.API_TOKEN in ("", "change-me"):
         log.warning("API_TOKEN is the default 'change-me': set a real token before exposing this backend")
     if config.SANDBOX_MODE == "remote" and config.SANDBOX_TOKEN == "sandbox-dev-token":

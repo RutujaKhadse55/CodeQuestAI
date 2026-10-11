@@ -161,3 +161,14 @@ class ChatMessage(SQLModel, table=True):
     content: str
     meta_json: str | None = None  # tools used, guard result, mode, sources (never hidden-test data)
     created_at: datetime = Field(default_factory=_now)
+
+
+class LearnerContext(SQLModel, table=True):
+    """The problem a learner is currently working on (set by the Explain tab, read by every other tab/endpoint)."""
+    __tablename__ = "learner_context"
+    user_id: str = Field(primary_key=True)
+    problem_slug: str
+    problem_url: str
+    problem_title: str | None = None
+    leetcode_username: str | None = None
+    updated_at: datetime = Field(default_factory=_now)

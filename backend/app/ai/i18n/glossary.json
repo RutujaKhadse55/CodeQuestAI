@@ -1,1 +1,14 @@
-{}
+{
+  "_note": "HI/MR renderings pending bilingual reviewer pass [NEEDS VERIFICATION]. 'keep' terms stay in English; 'terms' show Devanagari with the English word in brackets.",
+  "keep": ["loop", "index", "array", "variable", "input", "output", "iteration", "pointer", "hash map", "stack", "queue", "string", "list", "function", "return", "O(n)"],
+  "terms": {
+    "hi": {
+      "loop": "लूप (loop)", "index": "इंडेक्स (index)", "array": "ऐरे (array)", "variable": "वेरिएबल (variable)",
+      "iteration": "इटरेशन (iteration)", "boundary": "सीमा (boundary)", "empty input": "खाली इनपुट (empty input)"
+    },
+    "mr": {
+      "loop": "लूप (loop)", "index": "इंडेक्स (index)", "array": "ॲरे (array)", "variable": "व्हेरिएबल (variable)",
+      "iteration": "इटरेशन (iteration)", "boundary": "सीमा (boundary)", "empty input": "रिकामा इनपुट (empty input)"
+    }
+  }
+}

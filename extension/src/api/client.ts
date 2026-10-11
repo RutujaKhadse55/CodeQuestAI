@@ -165,6 +165,11 @@ export async function ttsSpeak(text: string, lang: string): Promise<{ audio_base
   return learnerFetch("/tts", { method: "POST", body: JSON.stringify({ text: text.slice(0, 1500), lang }) });
 }
 
+/** GET /context: the problem URL / LeetCode username the learner last used in the Explain tab (stored in the backend DB). */
+export function getContext(): Promise<{ context: { problem_slug: string; problem_url: string; problem_title: string | null; leetcode_username: string | null } | null }> {
+  return learnerFetch("/context");
+}
+
 /** POST /explain/problem: the backend fetches the problem from its LeetCode URL and explains it (optionally personalised). */
 export function explainProblem(body: Record<string, unknown>): Promise<ExplainProblemResponse> {
   return getConfig().then(({ langPref }) => learnerFetch<ExplainProblemResponse>("/explain/problem", {

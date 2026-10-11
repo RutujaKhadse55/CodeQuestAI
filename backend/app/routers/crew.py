@@ -35,7 +35,7 @@ def _enabled() -> None:
 
 
 class CrewRequest(BaseModel):
-    problem_slug: str = Field(min_length=1, max_length=200)
+    problem_slug: str | None = Field(default=None, max_length=200)  # omitted => the learner's stored current problem
     code: str | None = Field(default=None, max_length=MAX_CODE_CHARS)
     selected_code: str | None = Field(default=None, max_length=MAX_CODE_CHARS)
     language: str | None = Field(default=None, max_length=30)
@@ -56,6 +56,14 @@ def _problem(session: Session, slug: str) -> LCProblem:
 def _context(session: Session, req: CrewRequest, token: str) -> tuple[service.Ctx, str, Attempt | None]:
     probe = session.get(Attempt, req.attempt_id) if req.attempt_id is not None else None
     uid = resolve_user(session, req.user_id or (probe.user_id if probe else None), token)
+    slug = req.problem_slug
+    if not slug:
+        from ..db.models_core import LearnerContext
+        stored = session.get(LearnerContext, uid)
+        if stored is None:
+            raise ApiError(ErrorCode.VALIDATION_ERROR, "problem_slug is required (no current problem stored yet: use the Explain tab first)")
+        slug = stored.problem_slug
+    req = req.model_copy(update={"problem_slug": slug})
     attempt = None
     if req.attempt_id is not None:
         if probe is None or probe.user_id != uid:

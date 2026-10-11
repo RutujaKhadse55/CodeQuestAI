@@ -5,7 +5,7 @@ from sqlmodel import Session, delete, select
 
 from .. import providers
 from ..db.models_core import (ApiToken, Attempt, ConceptMastery, DiagnosisRow, HabitEvent, HintState,
-                              ChatMessage, ChatThread, LeetCodeProfileSnapshot, ProfileConsent, TestResultRow, User,
+                              ChatMessage, ChatThread, LeetCodeProfileSnapshot, LearnerContext, ProfileConsent, TestResultRow, User,
                               UserMistakeCount, UserSettings)
 from ..auth import issue_user_token
 from ..deps import get_session
@@ -38,6 +38,7 @@ def delete_user_data(user_id: str, session: Session = Depends(get_session)):
         wipe("diagnoses", DiagnosisRow, DiagnosisRow.attempt_id.in_(attempt_ids))
     wipe("attempts", Attempt, Attempt.user_id == user_id)
     wipe("hint_state", HintState, HintState.user_id == user_id)
+    wipe("learner_context", LearnerContext, LearnerContext.user_id == user_id)
     wipe("habit_events", HabitEvent, HabitEvent.user_id == user_id)
     wipe("concept_mastery", ConceptMastery, ConceptMastery.user_id == user_id)
     wipe("user_mistake_counts", UserMistakeCount, UserMistakeCount.user_id == user_id)

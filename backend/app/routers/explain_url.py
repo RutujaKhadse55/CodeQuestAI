@@ -16,7 +16,9 @@ from ..auth import resolve_user, user_token_header
 from ..chat import service as chat_service
 from ..contracts.enums import ErrorCode
 from ..crew import llm, service
-from ..db.models_core import Attempt, LCProblemRow
+from datetime import datetime, timezone
+
+from ..db.models_core import Attempt, LCProblemRow, LearnerContext
 from ..deps import get_session
 from ..errors import ApiError
 from ..engine.lang import normalize_lang
@@ -48,6 +50,49 @@ def _profile_text(session: Session, uid: str) -> tuple[str, str | None]:
     if s.get("streak") is not None:
         parts.append(f"Streak: {s['streak']} days")
     return "\n".join(parts), st["leetcode_username"]
+
+
+def _remember(session: Session, uid: str, slug: str, title: str | None, username: str | None) -> None:
+    """Persist the learner's current problem (+ LeetCode username) so every other tab / endpoint can use it."""
+    row = session.get(LearnerContext, uid) or LearnerContext(user_id=uid, problem_slug=slug, problem_url="")
+    row.problem_slug, row.problem_url = slug, f"https://leetcode.com/problems/{slug}/"
+    row.problem_title, row.updated_at = title, datetime.now(timezone.utc)
+    if username:
+        row.leetcode_username = username
+    session.add(row)
+    session.commit()
+
+
+def current_context(session: Session, uid: str) -> dict | None:
+    row = session.get(LearnerContext, uid)
+    return None if row is None else {"problem_slug": row.problem_slug, "problem_url": row.problem_url,
+                                     "problem_title": row.problem_title, "leetcode_username": row.leetcode_username,
+                                     "updated_at": row.updated_at.isoformat()}
+
+
+class ContextRequest(BaseModel):
+    url: str = Field(min_length=10, max_length=300)
+    user_id: str | None = None
+
+
+@router.get("/context")
+def get_context(user_id: str | None = None, session: Session = Depends(get_session),
+                token: str = Depends(user_token_header)):
+    """The learner's current problem URL / slug / username (None if none chosen yet)."""
+    return {"context": current_context(session, resolve_user(session, user_id, token))}
+
+
+@router.post("/context")
+def set_context(req: ContextRequest, session: Session = Depends(get_session), token: str = Depends(user_token_header)):
+    """Select the current problem by URL without fetching it (the problem must already be captured or be fetched later)."""
+    uid = resolve_user(session, req.user_id, token)
+    try:
+        slug = lcfetch.slug_from_url(req.url)
+    except lcfetch.FetchError as e:
+        raise ApiError(ErrorCode.VALIDATION_ERROR, str(e)) from e
+    row = session.get(LCProblemRow, slug)
+    _remember(session, uid, slug, row.title if row else None, None)
+    return {"context": current_context(session, uid)}
 
 
 @router.post("/explain/problem")
@@ -82,6 +127,7 @@ def explain_problem(req: ExplainUrlRequest, session: Session = Depends(get_sessi
             if out.get("sync_error"):
                 profile_notice = "Permission saved, but the profile could not be fetched: " + str(out["sync_error"].get("message"))
     profile, username = _profile_text(session, uid)
+    _remember(session, uid, problem.slug, problem.title, username)
 
     # 3. the learner's latest code for this problem (optional context)
     code = req.code
