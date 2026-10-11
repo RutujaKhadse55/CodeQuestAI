@@ -36,7 +36,7 @@ def test_mock_analyze_matches_contract_and_hides_fuzz(client):
 
 def test_mock_endpoints(client):
     assert client.post("/users", headers=H).json()["user_id"]
-        assert client.post("/hint", headers=H, json={}).json()["guard"]["passed"] is True
+    assert client.post("/hint", headers=H, json={}).json()["guard"]["passed"] is True
     assert "mastery" in client.get("/dashboard/u1", headers=H).json()
 
 
