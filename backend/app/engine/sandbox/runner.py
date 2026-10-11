@@ -72,7 +72,10 @@ def _docker(payload: dict, total: float) -> str:
         raise SandboxUnavailable("docker is not installed") from e
     if r.returncode == 125 or (r.returncode != 0 and not r.stdout and "docker" in r.stderr.lower()):
         raise SandboxUnavailable(r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "docker failed")
-    return _text(r.stdout)
+    out = _text(r.stdout)
+    if r.returncode in (137, 139):  # SIGKILL (OOM killer / limits) or SIGSEGV, no timeout involved
+        out += chr(10) + json.dumps({"killed": "sandbox process terminated (memory limit or crash)"}) + chr(10)
+    return out
 
 
 def _native(payload: dict, total: float) -> str:

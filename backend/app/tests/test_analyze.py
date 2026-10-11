@@ -86,3 +86,18 @@ def test_analyze_runtime_error_timeout_and_unordered(real_client):
 def test_attacks_endpoint_all_blocked(real_client):
     body = real_client.get("/admin/attacks", headers=H).json()
     assert body["blocked"] == body["total"] >= 7, body
+
+
+@needs_sandbox
+def test_no_hidden_or_fuzz_data_in_any_response(real_client):
+    """Exit criterion: responses carry only example/run_capture rows, never fuzz-kind data."""
+    real_client.post("/problems/capture", headers=H, json=_fixture("two-sum"))
+    for code in (GOOD_TWO_SUM, BAD_TWO_SUM):
+        body = _analyze(real_client, code).json()
+        assert {r["kind"] for r in body["results"]} <= {"example", "run_capture"}
+        assert "fuzz" not in json.dumps(body).lower()
+    from sqlmodel import Session, select
+    from app import db
+    from app.db.models_core import TestResultRow
+    with Session(db.engine) as s:
+        assert not s.exec(select(TestResultRow).where(TestResultRow.kind == "fuzz")).all()

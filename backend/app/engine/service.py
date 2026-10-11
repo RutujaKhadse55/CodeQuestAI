@@ -37,6 +37,7 @@ class SandboxEngine:
                    "timeout_s": timeout_s}
         lines = runner.run(payload, timeout_s * max(len(tests), 1))
         load_error = next((ln["load_error"] for ln in lines if "load_error" in ln), None)
+        killed = next((ln["killed"] for ln in lines if "killed" in ln), None)
         by_i = {ln["i"]: ln for ln in lines if "i" in ln}
         results: list[TestResult] = []
         for i, t in enumerate(tests):
@@ -45,7 +46,9 @@ class SandboxEngine:
                 results.append(TestResult(outcome="runtime_error", error=load_error, **base))
                 continue
             r = by_i.get(i)
-            if r is None or r["status"] == "timeout":
+            if r is None and killed:
+                results.append(TestResult(outcome="runtime_error", error=killed, **base))
+            elif r is None or r["status"] == "timeout":
                 results.append(TestResult(outcome="timeout", error="time limit exceeded", **base))
             elif r["status"] == "error":
                 results.append(TestResult(outcome="runtime_error", error=r.get("error"), **base))
