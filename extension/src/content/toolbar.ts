@@ -9,6 +9,12 @@
 
 import { disabledReason } from "./guards";
 
+// ── Phase 2: paste + timing tracking ──────────────────────────────────────────
+/** Running total of pasted characters since page load. Sent in /analyze. */
+export let totalPasteChars = 0;
+/** Page load time — elapsed_ms = Date.now() - pageLoadTime when Debug clicked. */
+export const pageLoadTime = Date.now();
+
 // ── context guard ─────────────────────────────────────────────────────────────
 
 function isContextValid(): boolean {
@@ -108,14 +114,25 @@ function initToolbar(): void {
   document.addEventListener("mouseup", handleMouseUp);
 
   // ── 2. Monaco selection (code editor) ────────────────────────────────────
-  //    mouseup DOES bubble from inside Monaco to the .monaco-editor container.
-  //    But window.getSelection() is empty. We detect the mouseup here,
-  //    then ask the SW to read Monaco's selection from the page world.
   watchForMonacoEditor();
 
   // ── 3. Hide on outside click ──────────────────────────────────────────────
   document.addEventListener("mousedown", (e) => {
     if (!e.composedPath().includes(hostEl!)) hideToolbar();
+  });
+
+  // ── 4. Paste detection (Phase 2) ─────────────────────────────────────────
+  //    LeetCode's editor fires paste on the hidden textarea inside Monaco.
+  document.addEventListener("paste", (e) => {
+    const pasted = e.clipboardData?.getData("text") ?? "";
+    totalPasteChars += pasted.length;
+  }, true);
+
+  // ── 5. Context menu messages from SW ──────────────────────────────────────
+  chrome.runtime.onMessage.addListener((msg: { type: string }) => {
+    if (msg.type === "CONTEXT_MENU_DEBUG" || msg.type === "CONTEXT_MENU_DEBUG_ALL") {
+      onDebugClick();
+    }
   });
 
   // ── 4. Context menu ───────────────────────────────────────────────────────
@@ -214,26 +231,33 @@ function hideToolbar(): void {
 
 // ── debug click ───────────────────────────────────────────────────────────────
 
+import { orchestrateDebug } from "./orchestrate";
+import { getResultCard } from "./result_card";
+
 function onDebugClick(): void {
   if (!isContextValid()) {
     document.getElementById("codequest-toolbar-host")?.remove();
     return;
   }
 
-  const text = window.getSelection()?.toString().trim() || lastSelectedText;
-  if (!text) {
-    showStatus("Select some code or text first!");
-    return;
-  }
+  const selectedText = window.getSelection()?.toString().trim() || lastSelectedText;
+  const card = getResultCard();
 
-  showStatus("Checking backend…");
-  chrome.runtime
-    .sendMessage({ type: "HEALTH_CHECK" })
-    .then((res: { error?: string } | undefined) => {
-      showStatus(res?.error ? "⚠️ Backend offline" : "✅ Backend OK");
-      if (!res?.error) setTimeout(hideToolbar, 1500);
+  card.showLoading("Capturing problem + analyzing code…");
+  hideToolbar();
+
+  orchestrateDebug(selectedText || undefined)
+    .then((outcome) => {
+      if (outcome.ok) {
+        const lang = outcome.data.problem.lang_selected;
+        card.showResults(outcome.data.analysis, outcome.data.problem.slug, lang);
+      } else {
+        card.showError(outcome.error.message, outcome.error.detail);
+      }
     })
-    .catch(() => showStatus("⚠️ Backend not reachable"));
+    .catch((err: unknown) => {
+      card.showError("Unexpected error", String(err));
+    });
 }
 
 function showStatus(text: string): void {
