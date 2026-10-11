@@ -4,3 +4,5 @@ pydantic>=2
 sqlmodel
 pytest
 httpx
+requests
+python-dotenv

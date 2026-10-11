@@ -1,0 +1,7 @@
+.git
+extension/node_modules
+extension/dist
+backend/data
+**/__pycache__
+**/.pytest_cache
+*.log

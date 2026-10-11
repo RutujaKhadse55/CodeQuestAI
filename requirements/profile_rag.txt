@@ -1,0 +1,6 @@
+# LeetCode profile RAG (Backend-owned; ported from codequest_leetcode_rag). Heavy: sentence-transformers pulls torch.
+requests>=2.32.0
+chromadb>=0.5.23
+sentence-transformers>=3.3.1
+python-dotenv>=1.0.1
+google-genai>=1.0.0

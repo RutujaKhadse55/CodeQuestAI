@@ -1,0 +1,12 @@
+{
+  "bug_off_by_one_bound_1.py": "off_by_one_bound",
+  "bug_off_by_one_bound_2.py": "off_by_one_bound",
+  "bug_wrong_operator_1.py": "wrong_operator",
+  "bug_wrong_operator_2.py": "wrong_operator",
+  "bug_accumulator_reset_1.py": "accumulator_reset",
+  "bug_wrong_comparison_1.py": "wrong_comparison",
+  "bug_wrong_init_1.py": "wrong_init",
+  "bug_missing_edge_single_1.py": "missing_edge_single",
+  "bug_hardcoded_output_1.py": "hardcoded_output",
+  "bug_wrong_comparison_2.py": "wrong_comparison"
+}

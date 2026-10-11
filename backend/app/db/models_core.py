@@ -118,3 +118,13 @@ class ApiToken(SQLModel, table=True):
     token_hash: str = Field(primary_key=True)
     user_id: str | None = None
     created_at: datetime = Field(default_factory=_now)
+
+
+class LeetCodeProfileSnapshot(SQLModel, table=True):
+    """The learner's last synced PUBLIC LeetCode profile (one per CodeQuest user). Wiped by delete-all."""
+    __tablename__ = "leetcode_profile_snapshots"
+    user_id: str = Field(primary_key=True)
+    username: str
+    payload_json: str
+    docs_indexed: int = 0
+    fetched_at: datetime = Field(default_factory=_now)

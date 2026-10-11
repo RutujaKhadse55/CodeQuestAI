@@ -1,10 +1,21 @@
+# Backend only; the extension is loaded unpacked in Chrome. Run: API_TOKEN=... docker compose up --build
 services:
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports: ["8000:8000"]
+    env_file:
+      - path: .env
+        required: false   # GEMINI_API_KEY etc.; never committed
     environment:
-      MOCK: "1"
-      API_TOKEN: change-me
-    volumes: ["./backend/data:/app/data"]
+      API_TOKEN: ${API_TOKEN:-change-me}
+      MOCK: "0"
+      SANDBOX_MODE: native
+    volumes: ["./backend/data:/srv/data"]
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g

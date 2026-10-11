@@ -1,1 +1,10 @@
-[]
+[
+  {"number": 1,   "slug": "two-sum",                          "title": "Two Sum",                          "difficulty": "Easy",   "concepts": ["array", "hash table"]},
+  {"number": 217, "slug": "contains-duplicate",               "title": "Contains Duplicate",               "difficulty": "Easy",   "concepts": ["array", "hash table", "sorting"]},
+  {"number": 242, "slug": "valid-anagram",                    "title": "Valid Anagram",                    "difficulty": "Easy",   "concepts": ["hash table", "string", "sorting"]},
+  {"number": 121, "slug": "best-time-to-buy-and-sell-stock",  "title": "Best Time to Buy and Sell Stock",  "difficulty": "Easy",   "concepts": ["array", "dynamic programming"]},
+  {"number": 53,  "slug": "maximum-subarray",                 "title": "Maximum Subarray",                 "difficulty": "Medium", "concepts": ["array", "dynamic programming", "divide and conquer"]},
+  {"number": 704, "slug": "binary-search",                    "title": "Binary Search",                    "difficulty": "Easy",   "concepts": ["array", "binary search"]},
+  {"number": 70,  "slug": "climbing-stairs",                  "title": "Climbing Stairs",                  "difficulty": "Easy",   "concepts": ["math", "dynamic programming", "memoization"]},
+  {"number": 268, "slug": "missing-number",                   "title": "Missing Number",                   "difficulty": "Easy",   "concepts": ["array", "hash table", "math", "binary search", "sorting"]}
+]

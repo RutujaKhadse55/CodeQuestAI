@@ -1,18 +1,19 @@
-# Sandbox attack set (Backend, Phase 1)
+# Sandbox attack set (generated 2026-10-11 14:30)
 
-Run: `GET /admin/attacks` or `pytest backend/app/engine/tests/test_attacks.py`. Sandbox = Docker
-(`--network none --memory 256m --cpus 1 --pids-limit 64 --read-only --cap-drop ALL --user 65534`), per-test 2 s timer.
+Sandbox = Docker (`--network none --memory 256m --cpus 1 --pids-limit 64 --read-only --cap-drop ALL`), AST policy first, per-test timer second.
 
-| # | Attack | Blocked by | Result |
-|---|---|---|---|
-| 1 | file read (`open`) | AST policy: banned_builtin | blocked |
-| 2 | `import os; os.system` | AST policy: import_not_allowed | blocked |
-| 3 | `import socket` network | AST policy: import_not_allowed | blocked |
-| 4 | `import subprocess` | AST policy: import_not_allowed | blocked |
-| 5 | `eval` / `__import__` | AST policy: banned_builtin | blocked |
-| 6 | dunder escape (`().__class__.__bases__`) | AST policy: dunder_access | blocked |
-| 7 | `while True: pass` | sandbox per-test timer | blocked (timeout) |
-| 8 | `[0] * 10**10` memory bomb | container memory limit | blocked (killed, reported as runtime_error) |
+| # | Attack | Blocked by | Detail | Blocked |
+|---|---|---|---|---|
+| 1 | file_read | policy | banned_builtin | yes |
+| 2 | os_system | policy | import_not_allowed | yes |
+| 3 | network_socket | policy | import_not_allowed | yes |
+| 4 | subprocess | policy | import_not_allowed | yes |
+| 5 | eval_exec | policy | banned_builtin | yes |
+| 6 | dunder_escape | policy | dunder_access | yes |
+| 7 | infinite_loop | sandbox | timeout | yes |
+| 8 | memory_bomb | sandbox | runtime_error | yes |
 
-Block rate: 8/8. Latency (`/analyze`, 3 examples, warm Docker): ~0.7 s per call (3 samples; full table in Phase 4).
-Defence in depth (tested): policy-bypass code (`import os`, `open`, `eval`, `getattr`) is stopped inside the harness; a solution that swallows the timeout exception is killed by the runner backstop with no stray containers; a print flood cannot forge result lines.
+**Block rate: 8/8 (100%)**
+
+Defence in depth is covered by `backend/app/engine/tests/test_attacks.py`: policy-bypass code is stopped by the harness import guard / removed builtins, a solution that swallows the timeout is killed by the runner backstop (no stray containers), and a print flood cannot forge result lines.
+The same 8/8 was reproduced with `SANDBOX_MODE=native` inside the production image (non-root, read-only filesystem).
