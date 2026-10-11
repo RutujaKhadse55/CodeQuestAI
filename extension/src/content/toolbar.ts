@@ -1,30 +1,32 @@
 // ─── Shadow-DOM Toolbar — content script ──────────────────────────────────
 // Injected into every https://leetcode.com/problems/* page.
-// Shows a floating Debug button on text selection; uses Shadow DOM to
-// isolate styles from LeetCode's CSS.
+// Shows a floating Debug button when the user selects ANY text on the page.
+// Uses Shadow DOM to isolate styles from LeetCode's CSS.
 
 import { disabledReason } from "./guards";
 
-// ── styles — declared FIRST to avoid TDZ errors in Rollup output ─────────────
+// ── styles — declared FIRST to avoid TDZ errors ───────────────────────────────
 
 const TOOLBAR_CSS = `
   :host { all: initial; }
   #cq-toolbar {
-    position: absolute;
-    display: flex;
+    position: fixed;
+    display: none;
     align-items: center;
     gap: 8px;
     background: #1a1a2e;
-    border: 1px solid #16213e;
+    border: 1px solid #2d3a5e;
     border-radius: 8px;
     padding: 6px 12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     pointer-events: all;
     font-family: 'Inter', system-ui, sans-serif;
     font-size: 13px;
     color: #e2e8f0;
-    animation: cq-fade-in 0.15s ease;
+    animation: cq-fade-in 0.12s ease;
+    z-index: 2147483647;
   }
+  #cq-toolbar.visible { display: flex; }
   @keyframes cq-fade-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -39,123 +41,163 @@ const TOOLBAR_CSS = `
     font-size: 13px;
     font-weight: 600;
     transition: opacity 0.15s;
+    white-space: nowrap;
   }
   #cq-debug-btn:hover { opacity: 0.85; }
   #cq-status {
     font-size: 12px;
     color: #94a3b8;
     white-space: nowrap;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 `;
+
+// ── refs ──────────────────────────────────────────────────────────────────────
+
+let toolbarEl: HTMLDivElement | null = null;
+let shadowRoot: ShadowRoot | null = null;
 
 // ── toolbar setup ─────────────────────────────────────────────────────────────
 
 function initToolbar(): void {
-  // Create host element (invisible wrapper)
+  // Host sits at fixed position 0,0 — the toolbar inside is `position:fixed`
   const host = document.createElement("div");
   host.id = "codequest-toolbar-host";
   host.style.cssText =
-    "position:absolute;z-index:2147483647;pointer-events:none;top:0;left:0;width:0;height:0;";
+    "position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;";
   document.documentElement.appendChild(host);
 
-  // Shadow root isolates our styles
-  const shadow = host.attachShadow({ mode: "open" });
+  shadowRoot = host.attachShadow({ mode: "open" });
 
-  // Inject toolbar styles
   const style = document.createElement("style");
   style.textContent = TOOLBAR_CSS;
-  shadow.appendChild(style);
+  shadowRoot.appendChild(style);
 
-  // Toolbar container
-  const toolbar = document.createElement("div");
-  toolbar.id = "cq-toolbar";
-  toolbar.setAttribute("role", "toolbar");
-  toolbar.setAttribute("aria-label", "CodeQuest AI");
-  toolbar.style.display = "none";
-  shadow.appendChild(toolbar);
+  toolbarEl = document.createElement("div");
+  toolbarEl.id = "cq-toolbar";
+  toolbarEl.setAttribute("role", "toolbar");
+  toolbarEl.setAttribute("aria-label", "CodeQuest AI");
+  shadowRoot.appendChild(toolbarEl);
 
-  // Debug button
   const btn = document.createElement("button");
   btn.id = "cq-debug-btn";
   btn.textContent = "🔍 Debug";
-  btn.title = "CodeQuest: Analyze selected code";
+  btn.title = "CodeQuest AI: Analyze selected code or text";
+  btn.addEventListener("mousedown", (e) => e.stopPropagation());
   btn.addEventListener("click", onDebugClick);
-  toolbar.appendChild(btn);
+  toolbarEl.appendChild(btn);
 
-  // Status text (shows "Analyzing…" etc.)
   const status = document.createElement("span");
   status.id = "cq-status";
-  toolbar.appendChild(status);
+  toolbarEl.appendChild(status);
 
-  // Show/hide toolbar on selection change
-  document.addEventListener("selectionchange", () => {
-    const sel = window.getSelection();
-    const text = sel?.toString().trim() ?? "";
-    if (text.length > 10) {
-      positionToolbar(toolbar, sel!);
-      toolbar.style.display = "flex";
-    } else {
-      toolbar.style.display = "none";
+  // ── Show toolbar on any text selection (mouseup is most reliable) ─────────
+  document.addEventListener("mouseup", handleMouseUp);
+
+  // ── Hide when clicking elsewhere ─────────────────────────────────────────
+  document.addEventListener("mousedown", (e) => {
+    // Don't hide if the click is inside our shadow toolbar
+    if (!toolbarEl) return;
+    const path = e.composedPath();
+    if (!path.includes(host)) {
+      hideToolbar();
     }
   });
 
-  // Listen for context-menu message from service worker
+  // ── Context menu from SW ──────────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg: { type: string }) => {
-    if (msg.type === "CONTEXT_MENU_DEBUG") {
-      onDebugClick();
-    }
+    if (msg.type === "CONTEXT_MENU_DEBUG") onDebugClick();
   });
 
-  console.info("[CQ] Toolbar initialised.");
+  console.info("[CQ] Toolbar ready — select any text to debug.");
 }
 
-// ── positioning ───────────────────────────────────────────────────────────────
+// ── selection handling ────────────────────────────────────────────────────────
 
-function positionToolbar(toolbar: HTMLDivElement, sel: Selection): void {
-  const range = sel.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
-  const top = rect.top + window.scrollY - 48; // above selection
-  const left = Math.max(8, rect.left + window.scrollX);
-  toolbar.style.cssText = `display:flex;position:absolute;top:${top}px;left:${left}px;`;
+function handleMouseUp(): void {
+  // Small delay so the selection is finalised
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const text = sel?.toString().trim() ?? "";
+
+    if (text.length < 3 || !sel || sel.rangeCount === 0) {
+      hideToolbar();
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+
+    // Don't show if selection has no visible area
+    if (rect.width === 0 && rect.height === 0) {
+      hideToolbar();
+      return;
+    }
+
+    showToolbarAt(rect);
+  }, 10);
+}
+
+function showToolbarAt(rect: DOMRect): void {
+  if (!toolbarEl) return;
+
+  // Position: above the selection, horizontally centred
+  const TOOLBAR_HEIGHT = 40;
+  const TOOLBAR_WIDTH = 140; // approximate
+  const MARGIN = 8;
+
+  let top = rect.top - TOOLBAR_HEIGHT - MARGIN;
+  // If not enough room above, show below
+  if (top < MARGIN) top = rect.bottom + MARGIN;
+
+  let left = rect.left + rect.width / 2 - TOOLBAR_WIDTH / 2;
+  left = Math.max(MARGIN, Math.min(left, window.innerWidth - TOOLBAR_WIDTH - MARGIN));
+
+  toolbarEl.style.top = `${top}px`;
+  toolbarEl.style.left = `${left}px`;
+  toolbarEl.classList.add("visible");
+}
+
+function hideToolbar(): void {
+  toolbarEl?.classList.remove("visible");
 }
 
 // ── debug action ──────────────────────────────────────────────────────────────
 
 function onDebugClick(): void {
-  const selectedCode = window.getSelection()?.toString().trim() ?? "";
-  if (!selectedCode) {
-    showStatus("Select your code first!");
+  const selectedText = window.getSelection()?.toString().trim() ?? "";
+  if (!selectedText) {
+    showStatus("Select some code or text first!");
     return;
   }
 
-  showStatus("Analyzing…");
+  showStatus("Checking backend…");
 
-  // Phase 0: health check ping
   chrome.runtime
     .sendMessage({ type: "HEALTH_CHECK" })
-    .then((response: { error?: string; version?: string } | undefined) => {
-      if (response?.error) {
-        showStatus("Backend offline — check options");
+    .then((res: { error?: string; version?: string } | undefined) => {
+      if (res?.error) {
+        showStatus("⚠️ Backend offline");
       } else {
-        showStatus(`Backend ✅ v${response?.version ?? "?"}`);
+        showStatus(`✅ Backend OK`);
+        setTimeout(() => hideToolbar(), 1500);
       }
     })
-    .catch((err: unknown) => {
-      showStatus("Error: " + String(err));
+    .catch(() => {
+      showStatus("⚠️ Backend not reachable");
     });
 }
 
 function showStatus(text: string): void {
-  const host = document.getElementById("codequest-toolbar-host");
-  if (!host?.shadowRoot) return;
-  const status = host.shadowRoot.getElementById("cq-status");
-  if (status) {
-    status.textContent = text;
-    setTimeout(() => { status.textContent = ""; }, 4000);
-  }
+  const status = shadowRoot?.getElementById("cq-status");
+  if (!status) return;
+  status.textContent = text;
+  setTimeout(() => { status.textContent = ""; }, 4000);
 }
 
-// ── entry point — run after DOM is ready ─────────────────────────────────────
+// ── entry point ───────────────────────────────────────────────────────────────
 
 function main(): void {
   const reason = disabledReason();
@@ -166,7 +208,6 @@ function main(): void {
   initToolbar();
 }
 
-// Defer slightly so the page DOM is settled
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", main);
 } else {
