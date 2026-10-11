@@ -1,1 +1,36 @@
-{}
+{
+  "toolbar": {
+    "debug": "🔍 Debug",
+    "analyzing": "Analyzing…",
+    "backend_ok": "Backend ✅",
+    "backend_offline": "Backend offline — check options",
+    "select_code_first": "Select your code first!"
+  },
+  "options": {
+    "title": "CodeQuest AI — Settings",
+    "backend_url": "Backend URL",
+    "token": "API Token",
+    "language": "Mentor Language",
+    "save": "Save",
+    "saved": "Saved ✓"
+  },
+  "panel": {
+    "verdict": "Verdict",
+    "trace": "Trace",
+    "hints": "Hints",
+    "voice": "Voice",
+    "chat": "Chat",
+    "verified": "Oracle Verified",
+    "unverified": "Unverified",
+    "disabled_here": "Disabled here"
+  },
+  "hint": {
+    "locked": "Complete more attempts to unlock this hint.",
+    "unlock_after": "Unlock after {{requirement}}"
+  },
+  "lang": {
+    "en": "English",
+    "hi": "Hindi",
+    "mr": "Marathi"
+  }
+}

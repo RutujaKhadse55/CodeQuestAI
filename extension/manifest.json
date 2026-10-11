@@ -2,10 +2,44 @@
   "manifest_version": 3,
   "name": "CodeQuest AI",
   "version": "0.1.0",
-  "description": "AI coding mentor for LeetCode",
-  "permissions": ["storage", "contextMenus", "offscreen"],
-  "host_permissions": ["https://leetcode.com/*", "http://localhost:8000/*"],
-  "background": {"service_worker": "src/background/service_worker.ts", "type": "module"},
-  "content_scripts": [{"matches": ["https://leetcode.com/problems/*"], "js": ["src/content/toolbar.ts"]}],
-  "options_page": "src/options/index.html"
+  "description": "AI coding mentor for LeetCode — debug smarter, not harder.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2a+1iiTuW3o5LT3zzzzzzzzzzzzzzzzzzzzz==",
+  "permissions": ["storage", "contextMenus", "offscreen", "scripting", "tabs"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "http://localhost:8000/*",
+    "https://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service_worker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["src/content/toolbar.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "CodeQuest AI",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "src/options/index.html",
+  "web_accessible_resources": [
+    {
+      "resources": ["src/panel/*", "src/offscreen/*"],
+      "matches": ["https://leetcode.com/*"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }
