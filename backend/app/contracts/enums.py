@@ -31,4 +31,31 @@ class ErrorCode(str, Enum):
     CREDIT_CAP_REACHED = "CREDIT_CAP_REACHED"
     UPSTREAM_FAILED = "UPSTREAM_FAILED"
 
-# TODO [BE]: Outcome, MistakeClass, FailureClass (freeze at T+0:45)
+
+
+class Outcome(str, Enum):
+    passed = "passed"
+    wrong_output = "wrong_output"
+    runtime_error = "runtime_error"
+    timeout = "timeout"
+
+
+class MistakeClass(str, Enum):
+    off_by_one_bound = "off_by_one_bound"
+    missing_empty_case = "missing_empty_case"
+    wrong_init = "wrong_init"
+    wrong_comparison = "wrong_comparison"
+    accumulator_reset = "accumulator_reset"
+    wrong_operator = "wrong_operator"
+    missing_edge_single = "missing_edge_single"
+    hardcoded_output = "hardcoded_output"
+
+
+class FailureClass(str, Enum):
+    empty = "empty"
+    single_element = "single_element"
+    duplicates = "duplicates"
+    negatives = "negatives"
+    large = "large"
+    boundary = "boundary"
+    general = "general"

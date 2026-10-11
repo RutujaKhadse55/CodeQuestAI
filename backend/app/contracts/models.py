@@ -78,3 +78,48 @@ class GuardResult(BaseModel):
     passed: bool
     retries: int
     source: Literal["llm", "template"]
+
+
+class HintResult(BaseModel):
+    level: int
+    text: str
+    locked: bool = False
+    requirements: str | None = None
+    guard: GuardResult | None = None
+
+
+class ChatEvent(BaseModel):
+    event: Literal["token", "done", "error"]
+    data: str | None = None
+    guard: GuardResult | None = None
+
+
+class ErrorBody(BaseModel):
+    """Common error body used by every endpoint."""
+    code: str
+    message: str | None = None
+
+
+class CaptureResponse(BaseModel):
+    problem_id: str
+    supported: bool
+    reason: str | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    user_id: str
+    problem_slug: str
+    code: str
+    language: str = "python3"
+    run_capture: RunCapture | None = None
+    paste_chars: int = 0
+    elapsed_ms: int = 0
+
+
+class AnalyzeResponse(BaseModel):
+    attempt_id: int
+    verified: Literal["oracle-verified", "unverified"]
+    results: list[TestResult]
+    diagnosis: Diagnosis | None = None
+    explanation: str | None = None
+    flags: list[str] = []

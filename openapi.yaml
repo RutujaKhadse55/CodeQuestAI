@@ -1,9 +1,178 @@
 openapi: 3.0.3
-info: {title: CodeQuest AI, version: 0.1.0}
-# Frozen at T+0:45 (plan §3.1 rule 2). Additive changes only after that.
+info:
+  title: CodeQuest AI
+  version: 0.1.0
+  description: |
+    Contract draft (Backend-owned). FREEZE at T+0:45; after that additive changes only
+    (new optional fields), acked by producer and consumer. MOCK=1 serves the examples below.
+servers: [{url: "http://localhost:8000"}]
+security: [{ApiToken: []}]
+components:
+  securitySchemes:
+    ApiToken: {type: apiKey, in: header, name: X-API-Token}
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string, enum: [UNAUTHORIZED, FORBIDDEN, VALIDATION_ERROR, RATE_LIMITED, CODE_REJECTED, HINT_LOCKED, UNSUPPORTED_PROBLEM, UNSUPPORTED_LANGUAGE, CREDIT_CAP_REACHED, UPSTREAM_FAILED]}
+        message: {type: string, nullable: true}
+    Example:
+      type: object
+      required: [input_text, output_text]
+      properties: {input_text: {type: string}, output_text: {type: string}}
+    RunCapture:
+      type: object
+      required: [verdict]
+      properties:
+        verdict: {type: string}
+        input: {type: string, nullable: true}
+        output: {type: string, nullable: true}
+        expected: {type: string, nullable: true}
+        stdout: {type: string, nullable: true}
+        error: {type: string, nullable: true}
+    LCProblem:
+      type: object
+      required: [slug, title, difficulty, tags, statement_text, examples, constraints_text, lang_selected, content_hash]
+      properties:
+        slug: {type: string}
+        title: {type: string}
+        difficulty: {type: string}
+        tags: {type: array, items: {type: string}}
+        statement_text: {type: string, maxLength: 8000}
+        examples: {type: array, items: {$ref: "#/components/schemas/Example"}}
+        constraints_text: {type: string}
+        starter_python: {type: string, nullable: true}
+        lang_selected: {type: string}
+        content_hash: {type: string}
+        run_capture: {allOf: [{$ref: "#/components/schemas/RunCapture"}], nullable: true}
+    TestResult:
+      type: object
+      required: [kind, outcome]
+      description: For kind=fuzz, input/expected/actual are ALWAYS null (hidden data is never shown).
+      properties:
+        kind: {type: string, enum: [example, run_capture, fuzz]}
+        outcome: {type: string, enum: [passed, wrong_output, runtime_error, timeout]}
+        input: {type: string, nullable: true}
+        expected: {type: string, nullable: true}
+        actual: {type: string, nullable: true}
+        failure_class: {type: string, nullable: true}
+    Divergence:
+      type: object
+      properties:
+        iteration: {type: integer, nullable: true}
+        variable: {type: string, nullable: true}
+        expected: {}
+        actual: {}
+        line: {type: integer, nullable: true}
+    Diagnosis:
+      type: object
+      properties:
+        mistake_class: {type: string, nullable: true}
+        confidence: {type: number}
+        failure_class: {type: string, nullable: true}
+        divergence: {allOf: [{$ref: "#/components/schemas/Divergence"}], nullable: true}
+    AnalyzeRequest:
+      type: object
+      required: [user_id, problem_slug, code]
+      properties:
+        user_id: {type: string}
+        problem_slug: {type: string}
+        code: {type: string}
+        language: {type: string, default: python3}
+        run_capture: {allOf: [{$ref: "#/components/schemas/RunCapture"}], nullable: true}
+        paste_chars: {type: integer, default: 0}
+        elapsed_ms: {type: integer, default: 0}
+    AnalyzeResponse:
+      type: object
+      required: [attempt_id, verified, results]
+      properties:
+        attempt_id: {type: integer}
+        verified: {type: string, enum: [oracle-verified, unverified]}
+        results: {type: array, items: {$ref: "#/components/schemas/TestResult"}}
+        diagnosis: {allOf: [{$ref: "#/components/schemas/Diagnosis"}], nullable: true}
+        explanation: {type: string, nullable: true}
+        flags: {type: array, items: {type: string}}
+    HintResult:
+      type: object
+      required: [level, text]
+      properties:
+        level: {type: integer, minimum: 1, maximum: 4}
+        text: {type: string}
+        locked: {type: boolean}
+        requirements: {type: string, nullable: true}
+        guard: {type: object, properties: {passed: {type: boolean}, retries: {type: integer}, source: {type: string, enum: [llm, template]}}}
 paths:
   /health:
     get:
-      summary: Liveness check
+      summary: Liveness check (token required)
       responses:
-        "200": {description: ok}
+        "200": {description: ok, content: {application/json: {example: {status: ok}}}}
+        "401": {description: UNAUTHORIZED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /users:
+    post:
+      summary: Create an anonymous learner
+      responses:
+        "200": {description: ok, content: {application/json: {example: {user_id: mock-user-1}}}}
+  /problems/capture:
+    post:
+      summary: Store a captured LeetCode problem (idempotent by content_hash)
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/LCProblem"}}}}
+      responses:
+        "200":
+          description: ok
+          content: {application/json: {example: {problem_id: two-sum, supported: true, reason: null}}}
+  /analyze:
+    post:
+      summary: Run the verification + diagnosis pipeline
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/AnalyzeRequest"}}}}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AnalyzeResponse"}
+              example:
+                attempt_id: 1
+                verified: oracle-verified
+                results:
+                  - {kind: example, outcome: passed, input: "nums = [2,7,11,15], target = 9", expected: "[0,1]", actual: "[0,1]"}
+                  - {kind: fuzz, outcome: wrong_output, failure_class: single_element}
+                diagnosis:
+                  mistake_class: missing_edge_single
+                  confidence: 0.86
+                  failure_class: single_element
+                  divergence: {iteration: 2, variable: seen, expected: {"2": 0}, actual: {}, line: 7}
+                explanation: Your loop skips the case where the list has a single element.
+                flags: []
+        "400": {description: CODE_REJECTED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /hint:
+    post:
+      summary: Next allowed hint (AI-owned; level enforced by Backend HintState)
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HintResult"}
+              example: {level: 1, text: "Think about what you need to remember while scanning the list.", locked: false, guard: {passed: true, retries: 0, source: template}}
+        "423": {description: HINT_LOCKED, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorBody"}}}}
+  /dashboard/{user_id}:
+    get:
+      summary: Mastery, mistakes, recent diagnoses
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200":
+          description: ok
+          content: {application/json: {example: {user_id: mock-user-1, mastery: {arrays: 1210}, mistakes: {missing_edge_single: 2}, recent: [], verified: {oracle-verified: 1, unverified: 0}}}}
+  /recommend/{user_id}:
+    get:
+      summary: Next curated LeetCode problem by weakest concept
+      parameters: [{name: user_id, in: path, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: ok, content: {application/json: {example: {slug: binary-search, title: Binary Search, reason: "weakest concept: boundaries"}}}}
+  /tts:
+    post:
+      summary: Text to speech (Agents-owned; mock returns browser fallback)
+      responses:
+        "200": {description: audio or fallback signal, content: {application/json: {example: {fallback: browser_tts}}}}
