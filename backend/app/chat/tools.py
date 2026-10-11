@@ -74,14 +74,10 @@ def get_history(ctx: ToolContext, a: GetHistoryArgs) -> dict:
 
 
 # --------------------------------------------------------------------------------------------- tool: run_analysis
-def _latest_attempt(ctx: ToolContext) -> dict:
-    a = ctx.session.exec(select(Attempt).where(Attempt.user_id == ctx.user_id,
-                                               Attempt.problem_slug == ctx.thread.problem_slug)
-                         .order_by(desc(Attempt.id))).first()
-    if a is None:
-        return {"available": False, "note": "no attempts on this problem yet"}
-    rows = ctx.session.exec(select(TestResultRow).where(TestResultRow.attempt_id == a.id)).all()
-    d = ctx.session.exec(select(DiagnosisRow).where(DiagnosisRow.attempt_id == a.id)).first()
+def attempt_summary(session: Session, a: Attempt) -> dict:
+    """Plain facts about one attempt: outcomes, classes and a short divergence. No code, no hidden inputs."""
+    rows = session.exec(select(TestResultRow).where(TestResultRow.attempt_id == a.id)).all()
+    d = session.exec(select(DiagnosisRow).where(DiagnosisRow.attempt_id == a.id)).first()
     out: dict = {"available": True, "attempt_id": a.id, "passed_all": a.passed_all, "verified": a.verified,
                  "tests": [{"kind": r.kind, "outcome": r.outcome, "error": _clip(r.error, 120) if r.error else None,
                             "failure_class": r.failure_class} for r in rows if r.kind != "fuzz"],
@@ -94,6 +90,15 @@ def _latest_attempt(ctx: ToolContext) -> dict:
                                             "line": div.get("line"), "expected": _clip(div.get("expected"), 40),
                                             "actual": _clip(div.get("actual"), 40)} if div else None)}
     return out  # no hidden/fuzz inputs exist in the DB; only classes and a short divergence
+
+
+def _latest_attempt(ctx: ToolContext) -> dict:
+    a = ctx.session.exec(select(Attempt).where(Attempt.user_id == ctx.user_id,
+                                               Attempt.problem_slug == ctx.thread.problem_slug)
+                         .order_by(desc(Attempt.id))).first()
+    if a is None:
+        return {"available": False, "note": "no attempts on this problem yet"}
+    return attempt_summary(ctx.session, a)
 
 
 def run_analysis(ctx: ToolContext, a: RunAnalysisArgs) -> dict:

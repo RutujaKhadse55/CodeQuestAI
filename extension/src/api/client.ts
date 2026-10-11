@@ -6,6 +6,9 @@ import type {
   AnalyzeRequest,
   AnalyzeResponse,
   CaptureResponse,
+  ChatSendResponse,
+  ConsentInfo,
+  ConsentStatus,
   HealthResponse,
   HintResult,
   LCProblem,
@@ -16,15 +19,62 @@ import type {
 interface StorageItems {
   backendUrl: string;
   backendToken: string;
+  langPref: string;
 }
 
 async function getConfig(): Promise<StorageItems> {
   return new Promise((resolve) => {
+    // The options page saves the API token under `token`; older code read `backendToken`. Accept both.
     chrome.storage.sync.get(
-      { backendUrl: "http://localhost:8000", backendToken: "dev" },
-      (items) => resolve(items as StorageItems)
+      { backendUrl: "http://localhost:8000", backendToken: "change-me", token: "", langPref: "en" },
+      (items) => resolve({
+        backendUrl: items.backendUrl,
+        backendToken: (items.token as string) || (items.backendToken as string),
+        langPref: items.langPref as string,
+      })
     );
   });
+}
+
+// ── learner identity (per-learner token issued by POST /users) ───────────────
+
+export interface Learner { userId: string; userToken: string }
+
+async function storedLearner(): Promise<Learner | null> {
+  const r = await chrome.storage.local.get(["cqUserId", "cqUserToken"]);
+  return r.cqUserId && r.cqUserToken ? { userId: r.cqUserId as string, userToken: r.cqUserToken as string } : null;
+}
+
+/** The learner this browser acts as. Created once via POST /users; the token is kept in chrome.storage.local. */
+export async function ensureLearner(forceNew = false): Promise<Learner> {
+  if (!forceNew) {
+    const have = await storedLearner();
+    if (have) return have;
+  }
+  const r = await apiFetch<{ user_id: string; user_token?: string }>("/users", { method: "POST" });
+  const learner = { userId: r.user_id, userToken: r.user_token ?? "" };
+  await chrome.storage.local.set({ cqUserId: learner.userId, cqUserToken: learner.userToken });
+  await chrome.storage.local.remove(Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith("cqThread:")));
+  return learner;
+}
+
+/** apiFetch as the authenticated learner (X-User-Token). Re-registers once if the backend no longer knows the token. */
+async function learnerFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  let learner = await ensureLearner();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await apiFetch<T>(path, {
+        ...options,
+        headers: { ...(options.headers as Record<string, string> ?? {}), "X-User-Token": learner.userToken },
+      });
+    } catch (err) {
+      if (attempt === 0 && /^401\b/.test(String((err as Error).message))) {
+        learner = await ensureLearner(true); // backend DB was reset or token lost
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 // ── fetch helper ──────────────────────────────────────────────────────────────
@@ -70,9 +120,11 @@ export async function captureProblem(problem: LCProblem): Promise<CaptureRespons
 
 /** POST /analyze — run tests, fuzz, diagnose */
 export async function analyzeProblem(req: AnalyzeRequest): Promise<AnalyzeResponse> {
+  // Attempts are stored under the SAME learner the chat uses, so chat can see "my latest attempt".
+  const learner = await ensureLearner();
   return apiFetch<AnalyzeResponse>("/analyze", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ ...req, user_id: learner.userId }),
   });
 }
 
@@ -82,15 +134,16 @@ export async function getHint(
   attemptId: number,
   level: number
 ): Promise<HintResult> {
-  return apiFetch<HintResult>("/hint", {
+  return learnerFetch<HintResult>("/hint", {
     method: "POST",
     body: JSON.stringify({ problem_slug: problemSlug, attempt_id: attemptId, level }),
   });
 }
 
 /** GET /dashboard/{user_id} — mastery, mistakes, recent diagnoses */
-export async function getDashboard(userId = "local-user"): Promise<Record<string, unknown>> {
-  return apiFetch<Record<string, unknown>>(`/dashboard/${userId}`);
+export async function getDashboard(userId?: string): Promise<Record<string, unknown>> {
+  const id = userId ?? (await ensureLearner()).userId;
+  return apiFetch<Record<string, unknown>>(`/dashboard/${id}`);
 }
 
 /** POST /explain — LLM plain-language explanation for a given attempt */
@@ -98,10 +151,66 @@ export async function getExplanation(
   attemptId: number,
   lang = "en"
 ): Promise<{ text: string }> {
-  return apiFetch<{ text: string }>("/explain", {
+  return learnerFetch<{ text: string }>("/explain", {
     method: "POST",
     body: JSON.stringify({ attempt_id: attemptId, lang }),
   });
+}
+
+// ── chat + profile consent (backend FEATURE_CHAT) ────────────────────────────
+
+/** Text of the permission dialog shown when the chat opens. */
+export function chatConsentInfo(): Promise<ConsentInfo> {
+  return apiFetch<ConsentInfo>("/chat/consent-info");
+}
+
+export function chatConsentStatus(): Promise<ConsentStatus> {
+  return learnerFetch<ConsentStatus>("/chat/consent");
+}
+
+/** The learner allows access: backend records consent and fetches + indexes their PUBLIC LeetCode profile. */
+export function chatGrantConsent(leetcodeUsername: string): Promise<ConsentStatus> {
+  return learnerFetch<ConsentStatus>("/chat/consent", {
+    method: "POST",
+    body: JSON.stringify({ leetcode_username: leetcodeUsername }),
+  });
+}
+
+/** Withdraw permission: backend deletes the stored profile and its index. */
+export function chatRevokeConsent(): Promise<ConsentStatus> {
+  return learnerFetch<ConsentStatus>("/chat/consent", { method: "DELETE" });
+}
+
+async function threadFor(slug: string, fresh = false): Promise<string> {
+  const key = `cqThread:${slug}`;
+  if (!fresh) {
+    const cached = (await chrome.storage.local.get(key))[key] as string | undefined;
+    if (cached) return cached;
+  }
+  const { langPref } = await getConfig();
+  const t = await learnerFetch<{ thread_id: string }>("/chat/threads", {
+    method: "POST",
+    body: JSON.stringify({ problem_slug: slug, language: langPref }),
+  });
+  await chrome.storage.local.set({ [key]: t.thread_id });
+  return t.thread_id;
+}
+
+/** Send one chat message about the problem `slug` (one thread per problem, created on demand). */
+export async function chatSend(slug: string, content: string): Promise<ChatSendResponse> {
+  const post = async (fresh: boolean) => {
+    const id = await threadFor(slug, fresh);
+    return learnerFetch<ChatSendResponse>(`/chat/threads/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  };
+  try {
+    return await post(false);
+  } catch (err) {
+    if (/^403\b/.test(String((err as Error).message))) return post(true); // thread gone (e.g. backend DB reset)
+    throw err;
+  }
 }
 
 export type { AnalyzeRequest };

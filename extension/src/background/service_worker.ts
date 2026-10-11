@@ -3,7 +3,10 @@
 // Also manages the offscreen document for audio playback (MV3 requirement).
 // Also executes scripts in the page MAIN world (for Monaco/LeetCode access).
 
-import { checkHealth, captureProblem, analyzeProblem, getHint, getDashboard, getExplanation } from "../api/client";
+import {
+  checkHealth, captureProblem, analyzeProblem, getHint, getDashboard, getExplanation,
+  chatConsentInfo, chatConsentStatus, chatGrantConsent, chatRevokeConsent, chatSend,
+} from "../api/client";
 import type { LCProblem, AnalyzeRequest } from "../api/types";
 
 // ── message types ─────────────────────────────────────────────────────────────
@@ -15,6 +18,11 @@ type SWMessage =
   | { type: "GET_HINT"; slug: string; attemptId: number; level: number }
   | { type: "GET_DASHBOARD" }
   | { type: "GET_EXPLANATION"; attemptId: number; lang?: string }
+  | { type: "CHAT_CONSENT_INFO" }
+  | { type: "CHAT_STATUS" }
+  | { type: "CHAT_GRANT"; username: string }
+  | { type: "CHAT_REVOKE" }
+  | { type: "CHAT_SEND"; slug: string; text: string }
   | { type: "GET_MONACO_SELECTION" }
   | { type: "GET_FULL_CODE" }
   | { type: "PLAY_TTS"; text: string; lang?: string }
@@ -56,6 +64,18 @@ async function handleMessage(
 
     case "GET_EXPLANATION":
       return getExplanation(msg.attemptId, msg.lang);
+
+    // ── problem chat + profile consent ───────────────────────────────────────
+    case "CHAT_CONSENT_INFO":
+      return chatConsentInfo();
+    case "CHAT_STATUS":
+      return chatConsentStatus();
+    case "CHAT_GRANT":
+      return chatGrantConsent(msg.username);
+    case "CHAT_REVOKE":
+      return chatRevokeConsent();
+    case "CHAT_SEND":
+      return chatSend(msg.slug, msg.text);
 
     // ── Monaco: read selected text ───────────────────────────────────────────
     case "GET_MONACO_SELECTION": {

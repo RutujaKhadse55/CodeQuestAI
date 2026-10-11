@@ -90,6 +90,8 @@ export interface AnalyzeResponse {
   explanation?: string | null;
   flags: string[];
   allowed_hint_level?: number | null;
+  /** convenience alias; the backend sends it as diagnosis.divergence */
+  divergence?: Divergence | null;
 }
 
 // ── POST /hint ────────────────────────────────────────────────────────────────
@@ -106,4 +108,47 @@ export interface HintResult {
 export interface HealthResponse {
   status: string;
   version: string;
+}
+
+// ── Chat + profile consent (backend/app/routers/problem_chat.py) ─────────────
+
+export interface ConsentInfo {
+  version: string;
+  scope: string;
+  title: string;
+  text: string;
+  data_accessed: string[];
+  not_accessed: string[];
+  retention: string;
+  can_revoke: boolean;
+}
+
+export interface ConsentStatus {
+  granted: boolean;
+  leetcode_username: string | null;
+  profile_synced: boolean;
+  sync_error?: { code: string; message?: string | null } | null;
+  summary?: {
+    solved?: Record<string, number>;
+    streak?: number | null;
+    top_languages?: Array<{ language: string; solved: number }>;
+  } | null;
+}
+
+export interface ChatReply {
+  content: string;
+  language: string;
+  mode: string; // llm | fallback | refusal | hint | not_personalised | guard_fallback
+  intent: string;
+  guard: { passed: boolean; retries: number; source: string };
+  tools_used: string[];
+  sources: string[];
+  personalized: boolean;
+  allowed_hint_level?: number | null;
+}
+
+export interface ChatSendResponse {
+  thread_id: string;
+  message_id: number;
+  reply: ChatReply;
 }

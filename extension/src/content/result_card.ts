@@ -1,7 +1,7 @@
 // ─── Result Card — Shadow DOM panel ──────────────────────────────────────────
 // Fully matches the CodeQuest reference screenshots.
 
-import type { AnalyzeResponse, TestResult, Diagnosis, Verified } from "../api/types";
+import type { AnalyzeResponse, TestResult, Diagnosis, Verified, ChatSendResponse, ConsentInfo, ConsentStatus } from "../api/types";
 import { LOGO_DATA_URL } from "../assets/logo";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -847,6 +847,7 @@ export class ResultCard {
           <button class="cab" id="cq-cab-explain"><span class="cab-icon">📖</span><span class="cab-label">Explain Problem</span></button>
           <button class="cab" id="cq-cab-debug"><span class="cab-icon">⚙️</span><span class="cab-label">Debug Code</span></button>
           <button class="cab" id="cq-cab-tests"><span class="cab-icon">↗</span><span class="cab-label">Generate Tests</span></button>
+          <button class="cab" id="cq-cab-profile"><span class="cab-icon">🔒</span><span class="cab-label">Profile access</span></button>
         </div>
         <div class="chat-messages" id="cq-chat-messages">
           <div class="chat-bubble">
@@ -1029,25 +1030,90 @@ export class ResultCard {
     };
     const hideTyping = () => { this.shadow.getElementById("cq-typing")?.remove(); };
 
-    const send = (text: string, fromUser = true) => {
+    // ── Backend chat (FEATURE_CHAT) with a local canned fallback when the backend/chat is unavailable ──
+    const addNote = (text: string) => {
+      const n = document.createElement("div");
+      n.style.cssText = "font-size:11px;color:#6b7280;text-align:center;margin:4px 12px;";
+      n.textContent = text; msgs.appendChild(n); msgs.scrollTop = msgs.scrollHeight;
+    };
+    const call = <T>(m: object): Promise<(T & { error?: string }) | null> =>
+      (chrome.runtime.sendMessage(m) as Promise<(T & { error?: string }) | null>).catch(() => null);
+
+    const send = async (text: string, fromUser = true) => {
       if (fromUser) addBubble(text, true);
       showTyping();
-      setTimeout(() => { hideTyping(); const r = this.chatReply(text); addBubble(r, false); playText(r); }, 700);
+      const r = await call<ChatSendResponse>({ type: "CHAT_SEND", slug: this.slug, text });
+      hideTyping();
+      if (!r || r.error || !r.reply) {
+        const local = this.chatReply(text);
+        addBubble(local, false); playText(local);
+        addNote("Offline mode: could not reach the CodeQuest chat service.");
+        return;
+      }
+      addBubble(r.reply.content, false);
+      const bits = [r.reply.personalized ? "🔒 personalised" : "", r.reply.mode === "refusal" ? "solution withheld" : "",
+        r.reply.mode === "guard_fallback" ? "answer filtered" : ""].filter(Boolean);
+      if (bits.length) addNote(bits.join(" · "));
+      playText(r.reply.content);
     };
+
+    // ── Profile consent: asked when the chat opens (until the learner decides) ──
+    const consentCard = async () => {
+      const info = await call<ConsentInfo>({ type: "CHAT_CONSENT_INFO" });
+      if (!info || info.error) { addNote("Profile access is not available right now."); return; }
+      const w = document.createElement("div"); w.className = "chat-bubble";
+      const av = document.createElement("div"); av.className = "chat-av"; av.textContent = "🔒";
+      const b = document.createElement("div"); b.className = "chat-text";
+      const title = document.createElement("div"); title.style.fontWeight = "700"; title.textContent = info.title;
+      const body = document.createElement("div"); body.style.cssText = "margin:4px 0 8px;font-size:12px;"; body.textContent = info.text;
+      const user = document.createElement("input"); user.className = "chat-input"; user.placeholder = "Your public LeetCode username";
+      user.style.cssText = "width:100%;box-sizing:border-box;margin-bottom:6px;";
+      const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;";
+      const allow = document.createElement("button"); allow.className = "cab"; allow.textContent = "Allow & fetch my profile";
+      const skip = document.createElement("button"); skip.className = "cab"; skip.textContent = "Not now";
+      const state = document.createElement("div"); state.style.cssText = "font-size:11px;margin-top:6px;color:#6b7280;";
+      row.append(allow, skip); b.append(title, body, user, row, state); w.append(av, b);
+      msgs.appendChild(w); msgs.scrollTop = msgs.scrollHeight;
+      skip.addEventListener("click", () => {
+        chrome.storage.local.set({ cqConsentAsked: true });
+        w.remove(); addNote("OK — chat works without personalisation. Use 🔒 Profile access to change this.");
+      });
+      allow.addEventListener("click", async () => {
+        const name = user.value.trim(); if (!name) { state.textContent = "Enter your LeetCode username first."; return; }
+        allow.disabled = skip.disabled = true; state.textContent = "Fetching your public profile… (this can take ~30 s)";
+        const st = await call<ConsentStatus>({ type: "CHAT_GRANT", username: name });
+        allow.disabled = skip.disabled = false;
+        if (!st || st.error) { state.textContent = "Could not save permission: " + (st?.error ?? "backend unreachable"); return; }
+        chrome.storage.local.set({ cqConsentAsked: true });
+        w.remove();
+        if (st.profile_synced) {
+          const solved = st.summary?.solved?.All;
+          addNote(`🔒 Profile loaded for ${st.leetcode_username}${solved != null ? ` — ${solved} solved` : ""}. Answers are now personalised.`);
+        } else addNote("Permission saved, but the profile could not be fetched yet" + (st.sync_error?.message ? ` (${st.sync_error.message})` : "") + ". Chat continues without it.");
+      });
+    };
+    call<ConsentStatus>({ type: "CHAT_STATUS" }).then(async (st) => {
+      if (!st || st.error) return; // chat disabled or backend offline: keep local replies
+      if (st.granted) { addNote(`🔒 Personalised with ${st.leetcode_username}'s public LeetCode profile.`); return; }
+      const asked = (await chrome.storage.local.get("cqConsentAsked")).cqConsentAsked;
+      if (!asked) consentCard();
+    });
+    this.shadow.getElementById("cq-cab-profile")?.addEventListener("click", async () => {
+      const st = await call<ConsentStatus>({ type: "CHAT_STATUS" });
+      if (!st || st.error) { addNote("Profile access is not available right now."); return; }
+      if (st.granted) {
+        const r = await call<ConsentStatus>({ type: "CHAT_REVOKE" });
+        chrome.storage.local.set({ cqConsentAsked: true });
+        addNote(r && !r.error ? "Permission withdrawn — your stored LeetCode profile data was deleted." : "Could not withdraw permission right now.");
+      } else consentCard();
+    });
 
     const submit = () => { const t = input.value.trim(); if (!t) return; input.value = ""; send(t); };
     sendBtn.addEventListener("click", submit);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
 
     this.shadow.getElementById("cq-cab-explain")?.addEventListener("click", () => {
-      addBubble("Explain this problem to me", true); showTyping();
-      setTimeout(() => {
-        hideTyping();
-        const exEl = this.shadow.getElementById("cq-explanation-text");
-        const text = exEl?.textContent?.trim()?.replace("Loading explanation…", "") || res.explanation
-          || "Focus on the constraints and edge cases. Think about what the function needs to return for special inputs.";
-        addBubble(text, false); playText(text);
-      }, 600);
+      send("Explain this problem to me in simple words.");
     });
 
     this.shadow.getElementById("cq-cab-debug")?.addEventListener("click", () => {
