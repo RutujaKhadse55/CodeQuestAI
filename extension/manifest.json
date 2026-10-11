@@ -3,7 +3,6 @@
   "name": "CodeQuest AI",
   "version": "0.1.0",
   "description": "AI coding mentor for LeetCode — debug smarter, not harder.",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2a+1iiTuW3o5LT3zzzzzzzzzzzzzzzzzzzzz==",
   "permissions": ["storage", "contextMenus", "offscreen", "scripting", "tabs"],
   "host_permissions": [
     "https://leetcode.com/*",
