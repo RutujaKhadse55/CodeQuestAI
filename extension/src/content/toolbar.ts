@@ -117,6 +117,9 @@ function initToolbar(): void {
     }
   });
 
+  // ── Also watch Monaco editor (loads lazily) ───────────────────────
+  watchMonacoEditor();
+
   // ── Context menu from SW ──────────────────────────────────────────────────
   if (isContextValid()) {
     chrome.runtime.onMessage.addListener((msg: { type: string }) => {
@@ -127,30 +130,109 @@ function initToolbar(): void {
   console.info("[CQ] Toolbar ready — select any text to debug.");
 }
 
-// ── selection handling ────────────────────────────────────────────────────────
+// ── Monaco editor support ─────────────────────────────────────────────────────
+// Monaco uses its own virtual DOM — window.getSelection() returns empty there.
+// We read the selection via the Monaco global API and attach mouseup directly
+// to the editor container so we don't miss events that don't bubble.
+
+interface MonacoSelection { startLineNumber: number; endLineNumber: number; startColumn: number; endColumn: number; }
+interface MonacoModel { getValueInRange(sel: MonacoSelection): string; }
+interface MonacoEditor { getSelection(): MonacoSelection | null; getModel(): MonacoModel | null; getDomNode(): HTMLElement | null; }
+interface MonacoGlobal { editor?: { getEditors?(): MonacoEditor[] } }
+
+let lastMonacoRect: DOMRect | null = null;
+
+/** Read selected text from Monaco if window.getSelection() is empty */
+function getMonacoSelectedText(): string {
+  try {
+    const w = window as unknown as { monaco?: MonacoGlobal };
+    const editors = w.monaco?.editor?.getEditors?.() ?? [];
+    for (const editor of editors) {
+      const sel = editor.getSelection?.();
+      const model = editor.getModel?.();
+      if (sel && model) {
+        const text = model.getValueInRange(sel).trim();
+        if (text) return text;
+      }
+    }
+  } catch { /* Monaco not available */ }
+  return "";
+}
+
+/** Get rect of the Monaco editor cursor/selection for toolbar positioning */
+function getMonacoSelectionRect(editorEl: HTMLElement): DOMRect | null {
+  const cursor = editorEl.querySelector(".cursor") as HTMLElement | null;
+  if (cursor) return cursor.getBoundingClientRect();
+  const viewLine = editorEl.querySelector(".selected-text") as HTMLElement | null;
+  if (viewLine) return viewLine.getBoundingClientRect();
+  return editorEl.getBoundingClientRect();
+}
+
+/** Attach mouseup to Monaco editor container (may not bubble to document) */
+function attachMonacoListener(editorEl: HTMLElement): void {
+  editorEl.addEventListener("mouseup", () => {
+    // Delay so Monaco finalises its internal selection
+    setTimeout(() => {
+      const text = getMonacoSelectedText();
+      if (text.length < 2) { hideToolbar(); return; }
+      const rect = getMonacoSelectionRect(editorEl);
+      lastMonacoRect = rect;
+      if (rect) showToolbarAt(rect);
+    }, 60);
+  });
+  console.info("[CQ] Attached to Monaco editor.");
+}
+
+/** Watch for Monaco editor appearing in the DOM (it loads lazily) */
+function watchMonacoEditor(): void {
+  const tryAttach = () => {
+    const editors = document.querySelectorAll(".monaco-editor");
+    editors.forEach((el) => {
+      if (!(el as HTMLElement).dataset.cqAttached) {
+        (el as HTMLElement).dataset.cqAttached = "1";
+        attachMonacoListener(el as HTMLElement);
+      }
+    });
+  };
+
+  tryAttach(); // immediate attempt
+
+  // Also observe DOM for Monaco appearing later
+  const obs = new MutationObserver(tryAttach);
+  obs.observe(document.body, { childList: true, subtree: true });
+}
+
+// ── selection handling (native + Monaco) ──────────────────────────────────────
 
 function handleMouseUp(): void {
   // Small delay so the selection is finalised
   setTimeout(() => {
+    // 1. Try native browser selection (description, constraints, examples)
     const sel = window.getSelection();
-    const text = sel?.toString().trim() ?? "";
+    const nativeText = sel?.toString().trim() ?? "";
 
-    if (text.length < 3 || !sel || sel.rangeCount === 0) {
-      hideToolbar();
+    if (nativeText.length >= 2 && sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width > 0 || rect.height > 0) {
+        showToolbarAt(rect);
+        return;
+      }
+    }
+
+    // 2. Try Monaco editor selection (code panel)
+    const monacoText = getMonacoSelectedText();
+    if (monacoText.length >= 2) {
+      // Monaco fires its own mouseup listener; we just ensure we're covered
+      // if the event does bubble up to document.
+      const monacoEl = document.querySelector(".monaco-editor") as HTMLElement | null;
+      const rect = monacoEl ? getMonacoSelectionRect(monacoEl) : lastMonacoRect;
+      if (rect) showToolbarAt(rect);
       return;
     }
 
-    const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-
-    // Don't show if selection has no visible area
-    if (rect.width === 0 && rect.height === 0) {
-      hideToolbar();
-      return;
-    }
-
-    showToolbarAt(rect);
-  }, 10);
+    hideToolbar();
+  }, 30);
 }
 
 function showToolbarAt(rect: DOMRect): void {
@@ -186,7 +268,11 @@ function onDebugClick(): void {
     return;
   }
 
-  const selectedText = window.getSelection()?.toString().trim() ?? "";
+  // Try native selection first, then Monaco
+  const selectedText =
+    window.getSelection()?.toString().trim() ||
+    getMonacoSelectedText();
+
   if (!selectedText) {
     showStatus("Select some code or text first!");
     return;
